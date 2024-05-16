@@ -3,10 +3,14 @@ use rune::{Diagnostics, Source, Sources, Vm};
 
 use std::sync::Arc;
 
+mod event;
+mod rope;
 mod tui;
 
 fn main() -> rune::support::Result<()> {
     let mut context = rune_modules::default_context()?;
+    context.install(event::module()?)?;
+    context.install(rope::module()?)?;
     context.install(tui::module()?)?;
 
     let mut sources: Sources = Sources::new();
@@ -23,8 +27,11 @@ fn main() -> rune::support::Result<()> {
         diagnostics.emit(&mut writer, &sources)?;
     }
 
-    let mut vm = Vm::new(Arc::new(context.runtime()?), Arc::new(result?));
-    if let Err(err) = vm.execute(["main"], ())?.complete().into_result() {
+    let res = {
+        let mut vm = Vm::new(Arc::new(context.runtime()?), Arc::new(result?));
+        vm.execute(["main"], ())?.complete().into_result()
+    };
+    if let Err(err) = res {
         err.emit(&mut writer, &sources)?;
     }
     Ok(())

@@ -1,4 +1,47 @@
 pub fn main() {
     let tui = new_tui().unwrap();
-    drop(tui);
+    let text = new_rope_with_text("Hello Sage!\n");
+    loop {
+        tui.draw(text);
+        if let Some(event) = poll_event(1000) {
+            match event {
+                #{ code: "c", ctrl: true, alt: false, shift: false } => return,
+                #{ code: "<enter>", .. } => text.append("\n"),
+                #{ code: "<backspace>", .. } => text.pop(),
+                _ if event.code.len() == 1 => text.append(event.code),
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Additional helpers for SageRope from src/rope.rs.
+// TODO: Move this to a library file.
+////////////////////////////////////////////////////////////////////////////////
+
+pub fn new_rope_with_text(text) {
+    let r = new_rope();
+    r.set_string(text);
+    return r;
+}
+
+impl SageRope {
+    pub fn is_empty(self) {
+        return self.len() == 0;
+    }
+
+    pub fn append(self, text) {
+        self.replace(self.len(), self.len(), text);
+    }
+
+    pub fn pop(self) {
+        let len = self.len();
+        if len != 0 {
+            self.replace(len - 1, len, "");
+        }
+    }
+
+    pub fn set_string(self, text) {
+        self.replace(0, self.len(), text);
+    }
 }
