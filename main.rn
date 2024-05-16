@@ -1,3 +1,4 @@
 pub fn main() {
-    println("TODO: Implement");
+    let tui = new_tui().unwrap();
+    drop(tui);
 }

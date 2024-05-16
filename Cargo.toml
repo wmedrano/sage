@@ -5,5 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
+crossterm = "0.27"
+ratatui = "0.26"
 rune = { version = "0.13", features = ["emit", "std", "cli"] }
 rune-modules = "0.13.2"
