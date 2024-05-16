@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0"
+rune = { version = "0.13", features = ["emit", "std", "cli"] }
+rune-modules = "0.13.2"
