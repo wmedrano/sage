@@ -4,63 +4,76 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout);
     defer bw.flush() catch {};
-    const script = try Script.init("main.sage", std.heap.page_allocator);
-    try script.print(bw.writer());
+
+    const filename = "main.sage";
+    const max_file_size = 1024 * 1024 * 1024; // 1 GiB
+    const contents = try std.fs.cwd().readFileAlloc(std.heap.page_allocator, filename, max_file_size);
+    var tokenizer = Tokenizer.init(contents);
+
+    while (try tokenizer.next()) |token| {
+        try bw.writer().print("Token(len={any}): {s}\n", .{ token.len, token });
+        try bw.flush();
+    }
 }
 
-const Script = struct {
-    filepath: []u8,
-    contents: []u8,
-    allocator: std.mem.Allocator,
+const TokenType = enum {
+    openParen,
+    closeParen,
+    whitespace,
+    word,
 
-    pub fn init(filepath: []const u8, allocator: std.mem.Allocator) !Script {
-        const input_file = try std.fs.cwd().openFile(filepath, .{});
-        const file_size = try input_file.getEndPos();
-        const contents = try allocator.alloc(u8, file_size);
-        const read_size = try input_file.readAll(contents);
-        if (read_size != file_size) {
-            return error.UnexpectedNumberOfBytesRead;
+    pub fn guess_type(s: []const u8) TokenType {
+        if (s.len == 1) {
+            return switch (s[0]) {
+                ' ' => return TokenType.whitespace,
+                '\n' => return TokenType.whitespace,
+                '(' => return TokenType.openParen,
+                ')' => return TokenType.closeParen,
+                else => return TokenType.word,
+            };
         }
-
-        const filepath_copy = try allocator.alloc(u8, filepath.len);
-        std.mem.copyForwards(u8, filepath_copy, filepath);
-
-        return .{
-            .filepath = filepath_copy,
-            .contents = contents,
-            .allocator = allocator,
-        };
-    }
-
-    pub fn free(self: *Script) void {
-        self.allocator.free(self.filepath);
-        self.allocator.free(self.contents);
-    }
-
-    pub fn print(self: *const Script, writer: anytype) !void {
-        _ = try writer.print("Script: {s}\n", .{self.filepath});
-        _ = try writer.print("{s}", .{self.contents});
+        return TokenType.word;
     }
 };
 
-fn print_script_contents(script_filepath: []const u8, writer: anytype, comptime allocator: std.mem.Allocator) !void {
-    var script = try Script.init(script_filepath, allocator);
-    defer script.free();
-    try script.print(writer);
-}
+const Tokenizer = struct {
+    contents: []const u8,
+    idx: usize,
 
-test "print_script_contents reads file" {
-    var result = std.ArrayList(u8).init(std.testing.allocator);
-    defer result.deinit();
-    try print_script_contents("main.sage", result.writer(), std.testing.allocator);
-    try std.testing.expectEqualStrings("Script: main.sage\n(+ 1 2 3 4)", result.items);
-}
+    pub fn init(contents: []const u8) Tokenizer {
+        return Tokenizer{
+            .contents = contents,
+            .idx = 0,
+        };
+    }
 
-test "print_script_contents with non-existant file returns an error" {
-    const writer = struct {
-        pub fn print(_: anytype, _: anytype) !usize {
-            unreachable;
+    pub fn peek(self: *Tokenizer) !?[]const u8 {
+        std.time.sleep(200000000);
+        if (self.idx == self.contents.len) {
+            return null;
         }
-    };
-    try std.testing.expectError(error.FileNotFound, print_script_contents("does-not-exist", writer, std.testing.allocator));
-}
+        const start = self.idx;
+        var end = start;
+        var token_type = TokenType.whitespace;
+        while (end < self.contents.len) {
+            const codepoint_length = std.unicode.utf8ByteSequenceLength(self.contents[0]) catch break;
+            const codepoint = self.contents[end .. end + codepoint_length];
+            if (start == end) {
+                token_type = TokenType.guess_type(codepoint);
+            } else {
+                const new_token_type = TokenType.guess_type(codepoint);
+                if (token_type != new_token_type) {
+                    break;
+                }
+            }
+            end += codepoint.len;
+        }
+        return self.contents[start..end];
+    }
+
+    pub fn next(self: *Tokenizer) !?[]const u8 {
+        const next_val = try self.peek() orelse return null;
+        self.idx += next_val.len;
+        return next_val;
+    }
+};
