@@ -4,7 +4,8 @@ pub const TokenType = enum {
     whitespace,
     openParen,
     closeParen,
-    identifierentifier,
+    identifier,
+    string,
 
     pub fn guess_type(s: []const u8) TokenType {
         if (s.len == 1) {
@@ -13,6 +14,7 @@ pub const TokenType = enum {
                 '\n' => return TokenType.whitespace,
                 '(' => return TokenType.openParen,
                 ')' => return TokenType.closeParen,
+                '"' => return TokenType.string,
                 else => return TokenType.identifier,
             };
         }
@@ -50,11 +52,17 @@ pub const Tokenizer = struct {
                 token_type = TokenType.guess_type(codepoint);
             } else {
                 const new_token_type = TokenType.guess_type(codepoint);
-                if (token_type != new_token_type) {
-                    break;
+                switch (token_type) {
+                    TokenType.string => if (new_token_type == TokenType.string) {
+                        end += codepoint_length;
+                        break;
+                    },
+                    else => if (token_type != new_token_type) {
+                        break;
+                    },
                 }
             }
-            end += codepoint.len;
+            end += codepoint_length;
         }
         return .{
             .typ = token_type,
@@ -88,6 +96,17 @@ test "parse expression" {
         .{ .typ = TokenType.identifier, .contents = "parse-expression-1" },
         .{ .typ = TokenType.whitespace, .contents = "  " },
         .{ .typ = TokenType.identifier, .contents = "234" },
+        .{ .typ = TokenType.closeParen, .contents = ")" },
+    }, result.items);
+}
+
+test "parse string" {
+    var tokenizer = Tokenizer.init("(\"(this is a string)\")");
+    const result = try tokenizer.collect_all(std.testing.allocator);
+    defer result.deinit();
+    try std.testing.expectEqualDeep(&[_]Token{
+        .{ .typ = TokenType.openParen, .contents = "(" },
+        .{ .typ = TokenType.string, .contents = "\"(this is a string)\"" },
         .{ .typ = TokenType.closeParen, .contents = ")" },
     }, result.items);
 }
