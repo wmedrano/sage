@@ -1,1 +1,1 @@
-(+ 1 2 3 4)
+(+ 1 (string-length "test-string"))

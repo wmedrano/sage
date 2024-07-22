@@ -41,6 +41,11 @@ pub const Tokenizer = struct {
         };
     }
 
+    // Start parsing the input stream from the beginning.
+    pub fn reset(self: *Tokenizer) void {
+        self.idx = 0;
+    }
+
     // Peek at the next token without advancing the iterator.
     pub fn peek(self: *Tokenizer) ?Token {
         if (self.idx == self.contents.len) {

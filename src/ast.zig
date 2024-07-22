@@ -25,6 +25,17 @@ pub const Leaf = union(LeafType) {
     int: i64,
     float: f64,
 
+    pub fn format(self: *const Leaf, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        switch (self.*) {
+            LeafType.identifier => |s| try writer.print("identifier({s})", .{s}),
+            LeafType.string => |s| try writer.print("string({s})", .{s}),
+            LeafType.int => |n| try writer.print("int({})", .{n}),
+            LeafType.float => |n| try writer.print("float({})", .{n}),
+        }
+    }
+
+    // Parse a leaf from an identifier. If the identifier matches a number, then it is parsed into
+    // an int or float Leaf.
     pub fn from_identifier(ident: []const u8) Leaf {
         if (std.fmt.parseInt(i64, ident, 10)) |i| {
             return .{ .int = i };
@@ -44,6 +55,41 @@ pub const Ast = union(AstType) {
     // will use alloc to allocate memory.
     pub fn init(t: *tokenizer.Tokenizer, alloc: std.mem.Allocator) SyntaxError![]Ast {
         return init_impl(t, false, alloc);
+    }
+
+    // Free the memory allocated by self. If you have a slice created by init, consider using
+    // deinit_slice instead.
+    pub fn deinit(self: *const Ast, alloc: std.mem.Allocator) void {
+        switch (self.*) {
+            AstType.leaf => {},
+            AstType.tree => |tree| {
+                for (tree) |*node| {
+                    node.deinit(alloc);
+                }
+                alloc.free(tree);
+            },
+        }
+    }
+
+    pub fn format(self: *const Ast, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        return self.format_impl(0, writer);
+    }
+
+    fn format_impl(self: *const Ast, indent: u8, writer: anytype) !void {
+        switch (self.*) {
+            AstType.leaf => |l| {
+                for (0..indent) |_| {
+                    try writer.print("  ", .{});
+                }
+                try writer.print("{any}\n", .{l});
+            },
+            AstType.tree => |elements| {
+                for (0.., elements) |idx, e| {
+                    const new_indent = if (idx == 0) indent else indent + 1;
+                    try e.format_impl(new_indent, writer);
+                }
+            },
+        }
     }
 
     fn init_impl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
@@ -80,20 +126,6 @@ pub const Ast = union(AstType) {
         const results = try alloc.alloc(Ast, result.items.len);
         std.mem.copyForwards(Ast, results, result.items);
         return results;
-    }
-
-    // Free the memory allocated by self. If you have a slice created by init, consider using
-    // deinit_slice instead.
-    pub fn deinit(self: *const Ast, alloc: std.mem.Allocator) void {
-        switch (self.*) {
-            AstType.leaf => {},
-            AstType.tree => |tree| {
-                for (tree) |*node| {
-                    node.deinit(alloc);
-                }
-                alloc.free(tree);
-            },
-        }
     }
 };
 
