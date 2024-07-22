@@ -42,7 +42,7 @@ pub const Tokenizer = struct {
     }
 
     // Peek at the next token without advancing the iterator.
-    pub fn peek(self: *Tokenizer) !?Token {
+    pub fn peek(self: *Tokenizer) ?Token {
         if (self.idx == self.contents.len) {
             return null;
         }
@@ -80,17 +80,17 @@ pub const Tokenizer = struct {
     }
 
     // Get the next token.
-    pub fn next(self: *Tokenizer) !?Token {
-        const next_val = try self.peek() orelse return null;
+    pub fn next(self: *Tokenizer) ?Token {
+        const next_val = self.peek() orelse return null;
         self.idx += next_val.contents.len;
         return next_val;
     }
 
     // Collect all the tokens into an AraryList.
-    pub fn collect_all(self: *Tokenizer, alloc: std.mem.Allocator) !std.ArrayList(Token) {
+    pub fn collect_all(self: *Tokenizer, alloc: std.mem.Allocator) std.mem.Allocator.Error!std.ArrayList(Token) {
         var ret = std.ArrayList(Token).init(alloc);
         errdefer ret.deinit();
-        while (try self.next()) |token| {
+        while (self.next()) |token| {
             try ret.append(token);
         }
         return ret;
