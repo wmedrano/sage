@@ -54,7 +54,9 @@ pub const Ast = union(AstType) {
     // Creates a new Ast. Some fields may reference data returned by the tokenizer. Other items
     // will use alloc to allocate memory.
     pub fn init(t: *tokenizer.Tokenizer, alloc: std.mem.Allocator) SyntaxError![]Ast {
-        return init_impl(t, false, alloc);
+        var tmp_alloc = std.heap.ArenaAllocator.init(alloc);
+        defer tmp_alloc.deinit();
+        return init_impl(t, false, alloc, tmp_alloc.allocator());
     }
 
     // Free the memory allocated by self. If you have a slice created by init, consider using
@@ -92,15 +94,15 @@ pub const Ast = union(AstType) {
         }
     }
 
-    fn init_impl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
-        var result = std.ArrayList(Ast).init(alloc);
-        defer result.deinit();
+    fn init_impl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator, tmp_alloc: std.mem.Allocator) SyntaxError![]Ast {
+        var result = std.ArrayList(Ast).init(tmp_alloc);
+        errdefer for (result.items) |*r| r.deinit(alloc);
         var has_close = false;
         while (t.next()) |token| {
             switch (token.typ) {
                 tokenizer.TokenType.whitespace => continue,
                 tokenizer.TokenType.openParen => {
-                    const sub_asts = try Ast.init_impl(t, true, alloc);
+                    const sub_asts = try Ast.init_impl(t, true, alloc, tmp_alloc);
                     try result.append(.{ .tree = sub_asts });
                 },
                 tokenizer.TokenType.closeParen => {
@@ -178,4 +180,10 @@ test "unmatched opening brace is error" {
     var t = tokenizer.Tokenizer.init("(()");
     const ast_or_err = Ast.init(&t, std.testing.allocator);
     try std.testing.expectError(SyntaxError.UnclosedParenthesis, ast_or_err);
+}
+
+test "error on second expression is detected" {
+    var t = tokenizer.Tokenizer.init("(+ 1 2 3) ))");
+    const ast_or_err = Ast.init(&t, std.testing.allocator);
+    try std.testing.expectError(SyntaxError.UnmatchedCloseParenthesis, ast_or_err);
 }
