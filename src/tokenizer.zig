@@ -7,10 +7,12 @@ pub const TokenType = enum {
     identifier,
     string,
 
+    // Guess the type of s by looking at the first character.
     pub fn guess_type(s: []const u8) TokenType {
         if (s.len == 1) {
             return switch (s[0]) {
                 ' ' => return TokenType.whitespace,
+                '\t' => return TokenType.whitespace,
                 '\n' => return TokenType.whitespace,
                 '(' => return TokenType.openParen,
                 ')' => return TokenType.closeParen,
@@ -31,6 +33,7 @@ pub const Tokenizer = struct {
     contents: []const u8,
     idx: usize,
 
+    // Create a tokenizer over contents.
     pub fn init(contents: []const u8) Tokenizer {
         return Tokenizer{
             .contents = contents,
@@ -38,6 +41,7 @@ pub const Tokenizer = struct {
         };
     }
 
+    // Peek at the next token without advancing the iterator.
     pub fn peek(self: *Tokenizer) !?Token {
         if (self.idx == self.contents.len) {
             return null;
@@ -53,11 +57,16 @@ pub const Tokenizer = struct {
             } else {
                 const new_token_type = TokenType.guess_type(codepoint);
                 switch (token_type) {
+                    TokenType.openParen => break,
+                    TokenType.closeParen => break,
                     TokenType.string => if (new_token_type == TokenType.string) {
                         end += codepoint_length;
                         break;
                     },
-                    else => if (token_type != new_token_type) {
+                    TokenType.whitespace => if (new_token_type != TokenType.whitespace) {
+                        break;
+                    },
+                    TokenType.identifier => if (new_token_type != TokenType.identifier) {
                         break;
                     },
                 }
@@ -70,12 +79,14 @@ pub const Tokenizer = struct {
         };
     }
 
+    // Get the next token.
     pub fn next(self: *Tokenizer) !?Token {
         const next_val = try self.peek() orelse return null;
         self.idx += next_val.contents.len;
         return next_val;
     }
 
+    // Collect all the tokens into an AraryList.
     pub fn collect_all(self: *Tokenizer, alloc: std.mem.Allocator) !std.ArrayList(Token) {
         var ret = std.ArrayList(Token).init(alloc);
         errdefer ret.deinit();
@@ -97,6 +108,20 @@ test "parse expression" {
         .{ .typ = TokenType.whitespace, .contents = "  " },
         .{ .typ = TokenType.identifier, .contents = "234" },
         .{ .typ = TokenType.closeParen, .contents = ")" },
+    }, result.items);
+}
+
+test "parse with duplicate tokens" {
+    var tokenizer = Tokenizer.init("  \t\n(())\"\"");
+    const result = try tokenizer.collect_all(std.testing.allocator);
+    defer result.deinit();
+    try std.testing.expectEqualDeep(&[_]Token{
+        .{ .typ = TokenType.whitespace, .contents = "  \t\n" },
+        .{ .typ = TokenType.openParen, .contents = "(" },
+        .{ .typ = TokenType.openParen, .contents = "(" },
+        .{ .typ = TokenType.closeParen, .contents = ")" },
+        .{ .typ = TokenType.closeParen, .contents = ")" },
+        .{ .typ = TokenType.string, .contents = "\"\"" },
     }, result.items);
 }
 

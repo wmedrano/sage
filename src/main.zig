@@ -15,9 +15,4 @@ pub fn main() !void {
         try bw.writer().print("Token(len={any}): {s}\n", .{ token.contents.len, token.contents });
         try bw.flush();
     }
-
-    var tokenizer2 = Tokenizer.init(contents);
-    const result = try tokenizer2.collect_all(std.heap.page_allocator);
-    defer result.deinit();
-    try bw.writer().print("{any}", .{result});
 }
