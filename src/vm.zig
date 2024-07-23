@@ -20,47 +20,56 @@ pub const VmError = std.mem.Allocator.Error || error{
 
 pub const Vm = struct {
     stack: std.ArrayList(val.Val),
-    function_frames: std.ArrayList(FunctionFrame),
+    function_frames: std.ArrayListUnmanaged(FunctionFrame),
     builtin_functions: []const val.Function = &builtin_functions,
 
+    /// Initialize a new VM with the given allocator.
     pub fn init(alloc: std.mem.Allocator) VmError!Vm {
         const stack = try std.ArrayList(val.Val).initCapacity(alloc, 1024);
-        const function_frames = try std.ArrayList(FunctionFrame).initCapacity(alloc, 1024);
+        const function_frames = try std.ArrayListUnmanaged(FunctionFrame).initCapacity(alloc, 1024);
         return .{
             .stack = stack,
             .function_frames = function_frames,
         };
     }
 
+    /// Deinitialize the VM. This deallocates the VM's allocated memory.
     pub fn deinit(self: *Vm) void {
         for (self.stack.items) |v| v.deinit(self.allocator());
         self.stack.deinit();
-        self.function_frames.deinit();
+        self.function_frames.deinit(self.allocator());
     }
 
+    /// Get the allocator used by the Vm.
     pub fn allocator(self: *Vm) std.mem.Allocator {
         return self.stack.allocator;
     }
 
+    /// Run the bytecode with the given args.
     pub fn runBytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []val.Val) VmError!val.Val {
+        if (args.len > 0) {
+            return VmError.NotImplemented;
+        }
         if (self.stack.items.len != 0) {
             return VmError.CorruptStack;
         }
         for (args) |arg| {
             try self.stack.append(try arg.clone(self.allocator()));
         }
-        try self.function_frames.append(.{ .bytecode = bc, .stack_start = 0 });
+        try self.function_frames.append(self.allocator(), .{ .bytecode = bc, .stack_start = 0 });
         while (try self.run_next()) {}
         const ret = self.stack.popOrNull() orelse val.Val{ .int = 0 };
         self.clearStack();
         return ret;
     }
 
+    /// Clear the stack of all its contents.
     fn clearStack(self: *Vm) void {
         for (self.stack.items) |v| v.deinit(self.allocator());
         self.stack.clearRetainingCapacity();
     }
 
+    /// Get the given symbol or null if it is not defined in the global scope.
     fn getSymbol(self: *Vm, symbol: []const u8) ?val.Val {
         for (self.builtin_functions) |*f| {
             if (std.mem.eql(u8, symbol, f.name)) {
@@ -70,6 +79,7 @@ pub const Vm = struct {
         return null;
     }
 
+    /// Run the next instruction and return if the Vm should continue executing.
     fn run_next(self: *Vm) VmError!bool {
         if (self.function_frames.items.len == 0) return false;
         const function_frame = &self.function_frames.items[self.function_frames.items.len - 1];
@@ -84,11 +94,13 @@ pub const Vm = struct {
         return true;
     }
 
+    /// Execute the push_const instruction.
     fn executePushConst(self: *Vm, bc: *const bytecode.ByteCodeFunc, const_idx: usize) VmError!void {
         const v = try bc.constants.items[const_idx].clone(self.allocator());
         try self.stack.append(v);
     }
 
+    /// Execute the deref instruction.
     fn executeDeref(self: *Vm) VmError!void {
         const v = try switch (self.stack.getLast()) {
             val.ValType.symbol => |s| self.getSymbol(s) orelse VmError.UndefinedSymbol,
@@ -99,6 +111,7 @@ pub const Vm = struct {
         try self.stack.append(cloned_val);
     }
 
+    /// Execute the eval instruction.
     fn executeEval(self: *Vm, n: usize) VmError!void {
         const function_idx = self.stack.items.len - n;
         const stack = self.stack.items[function_idx + 1 ..];
@@ -113,6 +126,7 @@ pub const Vm = struct {
         }
     }
 
+    /// Execute the return instruction.
     fn executeRet(self: *Vm) VmError!void {
         const function_frame = self.function_frames.pop();
         if (self.stack.items.len <= function_frame.stack_start) {

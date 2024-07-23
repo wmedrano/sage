@@ -17,9 +17,18 @@ pub const ByteCodeType = enum {
 };
 
 pub const ByteCode = union(ByteCodeType) {
+    /// Push a constant to the stack. Contains the index to the constant within the constants array.
     push_const: usize,
+    /// Replace the top symbol value in the stack with its real value.
     deref,
+    /// Evaluate the top n elements in the stack. The deepest element should contain a function with
+    /// the rest of the elements containing the arguments.
     eval: usize,
+    /// Return from the current function.
+    ///   - Take the top value of the stack as the return value.
+    ///   - Pop all items on the stack from the function frame's start to the end.
+    ///   - Push the return value to the top of the stack.
+    ///   - Pop the function frame.
     ret: void,
 
     pub fn format(self: *const ByteCode, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
