@@ -87,6 +87,11 @@ pub const AstCollection = struct {
         };
     }
 
+    pub fn init_with_str(src: []const u8, alloc: std.mem.Allocator) SyntaxError!AstCollection {
+        var t = tokenizer.Tokenizer.init(src);
+        return AstCollection.init(&t, alloc);
+    }
+
     pub fn deinit(self: AstCollection) void {
         for (self.asts) |*a| deinit_ast(a, self.alloc);
         self.alloc.free(self.asts);

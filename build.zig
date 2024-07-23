@@ -36,4 +36,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     })).step);
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{
+        .root_source_file = b.path("src/vm.zig"),
+        .target = target,
+        .optimize = optimize,
+    })).step);
 }
