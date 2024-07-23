@@ -39,7 +39,7 @@ pub const ByteCodeFunc = struct {
     pub fn init(ast: *const Ast, alloc: std.mem.Allocator) !ByteCodeFunc {
         var instructions = std.ArrayList(ByteCode).init(alloc);
         var constants = std.ArrayListUnmanaged(Val){};
-        try ByteCodeFunc.init_impl(ast, &instructions, &constants);
+        try ByteCodeFunc.initImpl(ast, &instructions, &constants);
         try instructions.append(.ret);
         return .{
             .instructions = instructions,
@@ -59,10 +59,10 @@ pub const ByteCodeFunc = struct {
         }
     }
 
-    fn init_impl(ast: *const Ast, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
+    fn initImpl(ast: *const Ast, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
         switch (ast.*) {
             AstType.leaf => |*l| {
-                const val = try leaf_to_val(l, res.allocator);
+                const val = try leafToVal(l, res.allocator);
                 const val_idx = constants.items.len;
                 try res.append(.{ .push_const = val_idx });
                 try constants.append(res.allocator, val);
@@ -71,17 +71,17 @@ pub const ByteCodeFunc = struct {
                 }
             },
             AstType.tree => |asts| {
-                for (asts) |*a| try ByteCodeFunc.init_impl(a, res, constants);
+                for (asts) |*a| try ByteCodeFunc.initImpl(a, res, constants);
                 try res.append(.{ .eval = asts.len });
             },
         }
     }
 };
 
-fn leaf_to_val(l: *const Leaf, alloc: std.mem.Allocator) !Val {
+fn leafToVal(l: *const Leaf, alloc: std.mem.Allocator) !Val {
     switch (l.*) {
         LeafType.identifier => return .{ .symbol = l.identifier },
-        LeafType.string => return try Val.init_string(l.string, alloc),
+        LeafType.string => return try Val.initString(l.string, alloc),
         LeafType.int => return .{ .int = l.int },
         LeafType.float => return .{ .float = l.float },
     }

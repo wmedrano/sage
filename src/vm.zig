@@ -42,7 +42,7 @@ pub const Vm = struct {
         return self.stack.allocator;
     }
 
-    fn run_bytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []val.Val) VmError!val.Val {
+    pub fn runBytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []val.Val) VmError!val.Val {
         if (self.stack.items.len != 0) {
             return VmError.CorruptStack;
         }
@@ -52,16 +52,16 @@ pub const Vm = struct {
         try self.function_frames.append(.{ .bytecode = bc, .stack_start = 0 });
         while (try self.run_next()) {}
         const ret = self.stack.popOrNull() orelse val.Val{ .int = 0 };
-        self.clear_stack();
+        self.clearStack();
         return ret;
     }
 
-    fn clear_stack(self: *Vm) void {
+    fn clearStack(self: *Vm) void {
         for (self.stack.items) |v| v.deinit(self.allocator());
         self.stack.clearRetainingCapacity();
     }
 
-    fn get_symbol(self: *Vm, symbol: []const u8) ?val.Val {
+    fn getSymbol(self: *Vm, symbol: []const u8) ?val.Val {
         for (self.builtin_functions) |*f| {
             if (std.mem.eql(u8, symbol, f.name)) {
                 return val.Val{ .function = f };
@@ -75,23 +75,23 @@ pub const Vm = struct {
         const function_frame = &self.function_frames.items[self.function_frames.items.len - 1];
         const instruction = function_frame.bytecode.instructions.items[function_frame.bytecode_idx];
         switch (instruction) {
-            bytecode.ByteCodeType.push_const => |i| try self.execute_push_const(function_frame.bytecode, i),
-            bytecode.ByteCodeType.deref => try self.execute_deref(),
-            bytecode.ByteCodeType.eval => |n| try self.execute_eval(n),
-            bytecode.ByteCodeType.ret => try self.execute_ret(),
+            bytecode.ByteCodeType.push_const => |i| try self.executePushConst(function_frame.bytecode, i),
+            bytecode.ByteCodeType.deref => try self.executeDeref(),
+            bytecode.ByteCodeType.eval => |n| try self.executeEval(n),
+            bytecode.ByteCodeType.ret => try self.executeRet(),
         }
         function_frame.bytecode_idx += 1;
         return true;
     }
 
-    fn execute_push_const(self: *Vm, bc: *const bytecode.ByteCodeFunc, const_idx: usize) VmError!void {
+    fn executePushConst(self: *Vm, bc: *const bytecode.ByteCodeFunc, const_idx: usize) VmError!void {
         const v = try bc.constants.items[const_idx].clone(self.allocator());
         try self.stack.append(v);
     }
 
-    fn execute_deref(self: *Vm) VmError!void {
+    fn executeDeref(self: *Vm) VmError!void {
         const v = try switch (self.stack.getLast()) {
-            val.ValType.symbol => |s| self.get_symbol(s) orelse VmError.UndefinedSymbol,
+            val.ValType.symbol => |s| self.getSymbol(s) orelse VmError.UndefinedSymbol,
             else => return VmError.WrongType,
         };
         const cloned_val = try v.clone(self.allocator());
@@ -99,7 +99,7 @@ pub const Vm = struct {
         try self.stack.append(cloned_val);
     }
 
-    fn execute_eval(self: *Vm, n: usize) VmError!void {
+    fn executeEval(self: *Vm, n: usize) VmError!void {
         const function_idx = self.stack.items.len - n;
         const stack = self.stack.items[function_idx + 1 ..];
         switch (self.stack.items[function_idx]) {
@@ -113,7 +113,7 @@ pub const Vm = struct {
         }
     }
 
-    fn execute_ret(self: *Vm) VmError!void {
+    fn executeRet(self: *Vm) VmError!void {
         const function_frame = self.function_frames.pop();
         if (self.stack.items.len <= function_frame.stack_start) {
             try self.stack.append(.{ .int = 0 });
@@ -127,11 +127,11 @@ pub const Vm = struct {
 };
 
 const builtin_functions = [_]val.Function{
-    .{ .name = "+", .function = add_function },
-    .{ .name = "string-length", .function = string_length_function },
+    .{ .name = "+", .function = addFunction },
+    .{ .name = "string-length", .function = stringLengthFunction },
 };
 
-fn string_length_function(args: []val.Val) !val.Val {
+fn stringLengthFunction(args: []val.Val) !val.Val {
     if (args.len != 1) {
         return error.RuntimeError;
     }
@@ -141,7 +141,7 @@ fn string_length_function(args: []val.Val) !val.Val {
     }
 }
 
-fn add_function(args: []val.Val) !val.Val {
+fn addFunction(args: []val.Val) !val.Val {
     var int_sum: i64 = 0;
     var float_sum: f64 = 0.0;
     var has_float = false;
@@ -163,7 +163,7 @@ fn add_function(args: []val.Val) !val.Val {
 
 test "expression can eval" {
     const src = "(+ (string-length \"four\") -5)";
-    const asts = try ast.AstCollection.init_with_str(src, std.testing.allocator);
+    const asts = try ast.AstCollection.initWithStr(src, std.testing.allocator);
     defer asts.deinit();
 
     var bc = try bytecode.ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
@@ -171,7 +171,7 @@ test "expression can eval" {
 
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    const actual = try vm.run_bytecode(&bc, &[_]val.Val{});
+    const actual = try vm.runBytecode(&bc, &[_]val.Val{});
     defer actual.deinit(vm.allocator());
     try std.testing.expectEqualDeep(
         val.Val{ .int = -1 },
@@ -181,7 +181,7 @@ test "expression can eval" {
 
 test "successful expression clears stack" {
     const src = "(+ 1 2 3)";
-    const asts = try ast.AstCollection.init_with_str(src, std.testing.allocator);
+    const asts = try ast.AstCollection.initWithStr(src, std.testing.allocator);
     defer asts.deinit();
 
     var bc = try bytecode.ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
@@ -189,7 +189,7 @@ test "successful expression clears stack" {
 
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var v = try vm.run_bytecode(&bc, &[_]val.Val{});
+    var v = try vm.runBytecode(&bc, &[_]val.Val{});
     defer v.deinit(vm.allocator());
 
     try std.testing.expectEqualDeep(vm.stack.items, &[_]val.Val{});
@@ -197,7 +197,7 @@ test "successful expression clears stack" {
 
 test "wrong args halts VM and maintains VM state" {
     const src = "(+ 10 (string-length 4))";
-    const asts = try ast.AstCollection.init_with_str(src, std.testing.allocator);
+    const asts = try ast.AstCollection.initWithStr(src, std.testing.allocator);
     defer asts.deinit();
 
     var bc = try bytecode.ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
@@ -205,11 +205,11 @@ test "wrong args halts VM and maintains VM state" {
 
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    try std.testing.expectError(error.RuntimeError, vm.run_bytecode(&bc, &[_]val.Val{}));
+    try std.testing.expectError(error.RuntimeError, vm.runBytecode(&bc, &[_]val.Val{}));
     try std.testing.expectEqualDeep(vm.stack.items, &[_]val.Val{
-        vm.get_symbol("+") orelse return error.SymbolNotFound,
+        vm.getSymbol("+") orelse return error.SymbolNotFound,
         .{ .int = 10 },
-        vm.get_symbol("string-length") orelse return error.SymbolNotFound,
+        vm.getSymbol("string-length") orelse return error.SymbolNotFound,
         .{ .int = 4 },
     });
     try std.testing.expectEqualDeep(vm.function_frames.items, &[_]FunctionFrame{

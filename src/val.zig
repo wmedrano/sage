@@ -27,7 +27,7 @@ pub const Val = union(ValType) {
     // A function. The memory allocation for this is not managed by Val.
     function: *const Function,
 
-    pub fn init_string(s: []const u8, alloc: std.mem.Allocator) !Val {
+    pub fn initString(s: []const u8, alloc: std.mem.Allocator) !Val {
         const s_copy = try alloc.alloc(u8, s.len);
         std.mem.copyForwards(u8, s_copy, s);
         return .{ .string = s_copy };

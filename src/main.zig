@@ -41,7 +41,7 @@ pub fn main() !void {
         var bc = try bytecode.ByteCodeFunc.init(&a, alloc);
         defer bc.deinit();
         try bw.writer().print("{any}", .{bc});
-        const expr_result = try vm.run_bytecode(&bc);
+        const expr_result = try vm.runBytecode(&bc, &.{});
         try bw.writer().print("result: {any}", .{expr_result});
     }
     try bw.writer().print("\nruntime-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});

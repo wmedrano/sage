@@ -36,7 +36,7 @@ pub const Leaf = union(LeafType) {
 
     // Parse a leaf from an identifier. If the identifier matches a number, then it is parsed into
     // an int or float Leaf.
-    pub fn from_identifier(ident: []const u8) Leaf {
+    pub fn fromIdentifier(ident: []const u8) Leaf {
         if (std.fmt.parseInt(i64, ident, 10)) |i| {
             return .{ .int = i };
         } else |_| {}
@@ -52,10 +52,10 @@ pub const Ast = union(AstType) {
     tree: []const Ast,
 
     pub fn format(self: *const Ast, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        return self.format_impl(0, writer);
+        return self.formatImpl(0, writer);
     }
 
-    fn format_impl(self: *const Ast, indent: u8, writer: anytype) !void {
+    fn formatImpl(self: *const Ast, indent: u8, writer: anytype) !void {
         switch (self.*) {
             AstType.leaf => |l| {
                 for (0..indent) |_| {
@@ -66,7 +66,7 @@ pub const Ast = union(AstType) {
             AstType.tree => |elements| {
                 for (0.., elements) |idx, e| {
                     const new_indent = if (idx == 0) indent else indent + 1;
-                    try e.format_impl(new_indent, writer);
+                    try e.formatImpl(new_indent, writer);
                 }
             },
         }
@@ -80,33 +80,33 @@ pub const AstCollection = struct {
     // Creates a new Ast. Some fields may reference data returned by the tokenizer. Other items
     // will use alloc to allocate memory.
     pub fn init(t: *tokenizer.Tokenizer, alloc: std.mem.Allocator) SyntaxError!AstCollection {
-        const asts = try AstCollection.init_impl(t, false, alloc);
+        const asts = try AstCollection.initImpl(t, false, alloc);
         return .{
             .asts = asts,
             .alloc = alloc,
         };
     }
 
-    pub fn init_with_str(src: []const u8, alloc: std.mem.Allocator) SyntaxError!AstCollection {
+    pub fn initWithStr(src: []const u8, alloc: std.mem.Allocator) SyntaxError!AstCollection {
         var t = tokenizer.Tokenizer.init(src);
         return AstCollection.init(&t, alloc);
     }
 
     pub fn deinit(self: AstCollection) void {
-        for (self.asts) |*a| deinit_ast(a, self.alloc);
+        for (self.asts) |*a| deinitAst(a, self.alloc);
         self.alloc.free(self.asts);
     }
 
-    fn init_impl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
+    fn initImpl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
         var result = std.ArrayList(Ast).init(alloc);
         defer result.deinit();
-        errdefer for (result.items) |*a| deinit_ast(a, alloc);
+        errdefer for (result.items) |*a| deinitAst(a, alloc);
         var has_close = false;
         while (t.next()) |token| {
             switch (token.typ) {
                 tokenizer.TokenType.whitespace => continue,
                 tokenizer.TokenType.openParen => {
-                    const sub_asts = try AstCollection.init_impl(t, true, alloc);
+                    const sub_asts = try AstCollection.initImpl(t, true, alloc);
                     try result.append(.{ .tree = sub_asts });
                 },
                 tokenizer.TokenType.closeParen => {
@@ -117,7 +117,7 @@ pub const AstCollection = struct {
                     break;
                 },
                 tokenizer.TokenType.identifier => {
-                    try result.append(.{ .leaf = Leaf.from_identifier(token.contents) });
+                    try result.append(.{ .leaf = Leaf.fromIdentifier(token.contents) });
                 },
                 tokenizer.TokenType.string => {
                     const s = token.contents[1 .. token.contents.len - 1];
@@ -133,12 +133,12 @@ pub const AstCollection = struct {
     }
 };
 
-fn deinit_ast(ast: *const Ast, alloc: std.mem.Allocator) void {
+fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
     switch (ast.*) {
         AstType.leaf => {},
         AstType.tree => |tree| {
             for (tree) |*node| {
-                deinit_ast(node, alloc);
+                deinitAst(node, alloc);
             }
             alloc.free(tree);
         },

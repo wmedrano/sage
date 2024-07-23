@@ -8,7 +8,7 @@ pub const TokenType = enum {
     string,
 
     // Guess the type of s by looking at the first character.
-    pub fn guess_type(s: []const u8) TokenType {
+    pub fn guessType(s: []const u8) TokenType {
         if (s.len == 1) {
             return switch (s[0]) {
                 ' ' => return TokenType.whitespace,
@@ -58,9 +58,9 @@ pub const Tokenizer = struct {
             const codepoint_length = std.unicode.utf8ByteSequenceLength(self.contents[0]) catch break;
             const codepoint = self.contents[end .. end + codepoint_length];
             if (start == end) {
-                token_type = TokenType.guess_type(codepoint);
+                token_type = TokenType.guessType(codepoint);
             } else {
-                const new_token_type = TokenType.guess_type(codepoint);
+                const new_token_type = TokenType.guessType(codepoint);
                 switch (token_type) {
                     TokenType.openParen => break,
                     TokenType.closeParen => break,
@@ -92,7 +92,7 @@ pub const Tokenizer = struct {
     }
 
     // Collect all the tokens into an AraryList.
-    pub fn collect_all(self: *Tokenizer, alloc: std.mem.Allocator) std.mem.Allocator.Error!std.ArrayList(Token) {
+    pub fn collectAll(self: *Tokenizer, alloc: std.mem.Allocator) std.mem.Allocator.Error!std.ArrayList(Token) {
         var ret = std.ArrayList(Token).init(alloc);
         errdefer ret.deinit();
         while (self.next()) |token| {
@@ -104,7 +104,7 @@ pub const Tokenizer = struct {
 
 test "parse expression" {
     var tokenizer = Tokenizer.init(" (parse-expression-1  234)");
-    const result = try tokenizer.collect_all(std.testing.allocator);
+    const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{
         .{ .typ = TokenType.whitespace, .contents = " " },
@@ -118,7 +118,7 @@ test "parse expression" {
 
 test "parse with duplicate tokens" {
     var tokenizer = Tokenizer.init("  \t\n(())\"\"");
-    const result = try tokenizer.collect_all(std.testing.allocator);
+    const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{
         .{ .typ = TokenType.whitespace, .contents = "  \t\n" },
@@ -132,7 +132,7 @@ test "parse with duplicate tokens" {
 
 test "parse string" {
     var tokenizer = Tokenizer.init("(\"(this is a string)\")");
-    const result = try tokenizer.collect_all(std.testing.allocator);
+    const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{
         .{ .typ = TokenType.openParen, .contents = "(" },
@@ -143,7 +143,7 @@ test "parse string" {
 
 test "empty expression" {
     var tokenizer = Tokenizer.init("");
-    const result = try tokenizer.collect_all(std.testing.allocator);
+    const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{}, result.items);
 }
