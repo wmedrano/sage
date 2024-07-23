@@ -34,11 +34,11 @@ pub const ByteCode = union(ByteCodeType) {
 
 pub const ByteCodeFunc = struct {
     instructions: std.ArrayList(ByteCode),
-    constants: std.ArrayList(Val),
+    constants: std.ArrayListUnmanaged(Val),
 
     pub fn init(ast: *const Ast, alloc: std.mem.Allocator) !ByteCodeFunc {
         var instructions = std.ArrayList(ByteCode).init(alloc);
-        var constants = std.ArrayList(Val).init(alloc);
+        var constants = std.ArrayListUnmanaged(Val){};
         try ByteCodeFunc.init_impl(ast, &instructions, &constants);
         try instructions.append(.ret);
         return .{
@@ -47,10 +47,10 @@ pub const ByteCodeFunc = struct {
         };
     }
 
-    pub fn deinit(self: ByteCodeFunc) void {
+    pub fn deinit(self: *ByteCodeFunc) void {
+        for (self.constants.items) |v| v.deinit(self.instructions.allocator);
+        self.constants.deinit(self.instructions.allocator);
         self.instructions.deinit();
-        for (self.constants.items) |v| v.deinit(self.constants.allocator);
-        self.constants.deinit();
     }
 
     pub fn format(self: *const ByteCodeFunc, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
@@ -59,13 +59,13 @@ pub const ByteCodeFunc = struct {
         }
     }
 
-    fn init_impl(ast: *const Ast, res: *std.ArrayList(ByteCode), constants: *std.ArrayList(Val)) !void {
+    fn init_impl(ast: *const Ast, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
         switch (ast.*) {
             AstType.leaf => |*l| {
                 const val = try leaf_to_val(l, res.allocator);
                 const val_idx = constants.items.len;
                 try res.append(.{ .push_const = val_idx });
-                try constants.append(val);
+                try constants.append(res.allocator, val);
                 if (@as(ValType, val) == ValType.symbol) {
                     try res.append(.deref);
                 }

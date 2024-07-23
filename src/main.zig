@@ -30,14 +30,19 @@ pub fn main() !void {
     defer asts.deinit();
     for (1.., asts.asts) |n, a| {
         try bw.writer().print("expression: #{}\n", .{n});
-        try bw.writer().print("{any}\n", .{a});
+        try bw.writer().print("{any}", .{a});
     }
+    try bw.writer().print("compile-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
 
+    var vm = try @import("vm.zig").Vm.init(alloc);
+    defer vm.deinit();
     for (1.., asts.asts) |n, a| {
         try bw.writer().print("bytecode: #{}\n", .{n});
-        const bc = try bytecode.ByteCodeFunc.init(&a, alloc);
+        var bc = try bytecode.ByteCodeFunc.init(&a, alloc);
+        defer bc.deinit();
         try bw.writer().print("{any}", .{bc});
-        bc.deinit();
+        const expr_result = try vm.run_bytecode(&bc);
+        try bw.writer().print("result: {any}", .{expr_result});
     }
-    try bw.writer().print("\nprocessing-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
+    try bw.writer().print("\nruntime-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
 }

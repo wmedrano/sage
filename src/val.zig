@@ -5,6 +5,14 @@ pub const ValType = enum {
     int,
     float,
     string,
+    function,
+};
+
+pub const FunctionError = error{ RuntimeError, NotImplemented };
+
+pub const Function = struct {
+    name: []const u8,
+    function: *const fn ([]Val) FunctionError!Val,
 };
 
 pub const Val = union(ValType) {
@@ -16,6 +24,8 @@ pub const Val = union(ValType) {
     float: f64,
     // A mutable string.
     string: []u8,
+    // A function. The memory allocation for this is not managed by Val.
+    function: *const Function,
 
     pub fn init_string(s: []const u8, alloc: std.mem.Allocator) !Val {
         const s_copy = try alloc.alloc(u8, s.len);
@@ -29,13 +39,14 @@ pub const Val = union(ValType) {
             ValType.int => {},
             ValType.float => {},
             ValType.string => alloc.free(self.string),
+            ValType.function => {},
         }
     }
 
     pub fn clone(self: *const Val, alloc: std.mem.Allocator) !Val {
         switch (self.*) {
             ValType.string => |s| {
-                const new_s = alloc.alloc(u8, s.len);
+                const new_s = try alloc.alloc(u8, s.len);
                 std.mem.copyForwards(u8, new_s, s);
                 return .{ .string = new_s };
             },
@@ -49,6 +60,7 @@ pub const Val = union(ValType) {
             ValType.int => |n| try writer.print("int({d})", .{n}),
             ValType.float => |n| try writer.print("float({d})", .{n}),
             ValType.string => |s| try writer.print("string({s})", .{s}),
+            ValType.function => |f| try writer.print("function({s})", .{f.name}),
         }
     }
 };
