@@ -51,28 +51,6 @@ pub const Ast = union(AstType) {
     leaf: Leaf,
     tree: []const Ast,
 
-    // Creates a new Ast. Some fields may reference data returned by the tokenizer. Other items
-    // will use alloc to allocate memory.
-    pub fn init(t: *tokenizer.Tokenizer, alloc: std.mem.Allocator) SyntaxError![]Ast {
-        var tmp_alloc = std.heap.ArenaAllocator.init(alloc);
-        defer tmp_alloc.deinit();
-        return init_impl(t, false, alloc, tmp_alloc.allocator());
-    }
-
-    // Free the memory allocated by self. If you have a slice created by init, consider using
-    // deinit_slice instead.
-    pub fn deinit(self: *const Ast, alloc: std.mem.Allocator) void {
-        switch (self.*) {
-            AstType.leaf => {},
-            AstType.tree => |tree| {
-                for (tree) |*node| {
-                    node.deinit(alloc);
-                }
-                alloc.free(tree);
-            },
-        }
-    }
-
     pub fn format(self: *const Ast, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         return self.format_impl(0, writer);
     }
@@ -93,16 +71,37 @@ pub const Ast = union(AstType) {
             },
         }
     }
+};
 
-    fn init_impl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator, tmp_alloc: std.mem.Allocator) SyntaxError![]Ast {
-        var result = std.ArrayList(Ast).init(tmp_alloc);
-        errdefer for (result.items) |*r| r.deinit(alloc);
+pub const AstCollection = struct {
+    asts: []const Ast,
+    alloc: std.mem.Allocator,
+
+    // Creates a new Ast. Some fields may reference data returned by the tokenizer. Other items
+    // will use alloc to allocate memory.
+    pub fn init(t: *tokenizer.Tokenizer, alloc: std.mem.Allocator) SyntaxError!AstCollection {
+        const asts = try AstCollection.init_impl(t, false, alloc);
+        return .{
+            .asts = asts,
+            .alloc = alloc,
+        };
+    }
+
+    pub fn deinit(self: AstCollection) void {
+        for (self.asts) |*a| deinit_ast(a, self.alloc);
+        self.alloc.free(self.asts);
+    }
+
+    fn init_impl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
+        var result = std.ArrayList(Ast).init(alloc);
+        defer result.deinit();
+        errdefer for (result.items) |*a| deinit_ast(a, alloc);
         var has_close = false;
         while (t.next()) |token| {
             switch (token.typ) {
                 tokenizer.TokenType.whitespace => continue,
                 tokenizer.TokenType.openParen => {
-                    const sub_asts = try Ast.init_impl(t, true, alloc, tmp_alloc);
+                    const sub_asts = try AstCollection.init_impl(t, true, alloc);
                     try result.append(.{ .tree = sub_asts });
                 },
                 tokenizer.TokenType.closeParen => {
@@ -125,65 +124,75 @@ pub const Ast = union(AstType) {
         if (want_close and !has_close) {
             return SyntaxError.UnclosedParenthesis;
         }
-        const results = try alloc.alloc(Ast, result.items.len);
-        std.mem.copyForwards(Ast, results, result.items);
-        return results;
+        return try result.toOwnedSlice();
     }
 };
 
-// Calls deinit on each Ast and deallocates the memory of the slice.
-pub fn deinit_slice(slice: []Ast, alloc: std.mem.Allocator) void {
-    for (slice) |a| a.deinit(alloc);
-    alloc.free(slice);
+fn deinit_ast(ast: *const Ast, alloc: std.mem.Allocator) void {
+    switch (ast.*) {
+        AstType.leaf => {},
+        AstType.tree => |tree| {
+            for (tree) |*node| {
+                deinit_ast(node, alloc);
+            }
+            alloc.free(tree);
+        },
+    }
 }
 
 test "basic expression is parsed" {
     var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\"))");
-    const ast = try Ast.init(&t, std.testing.allocator);
-    defer deinit_slice(ast, std.testing.allocator);
+    var ast = try AstCollection.init(&t, std.testing.allocator);
+    defer ast.deinit();
 
-    try std.testing.expectEqualDeep(&[_]Ast{
-        .{
-            .tree = &.{
-                .{ .leaf = .{ .identifier = "+" } },
-                .{ .leaf = .{ .int = 1 } },
-                .{ .leaf = .{ .float = 2.1 } },
-                .{ .tree = &.{
-                    .{ .leaf = .{ .identifier = "string-length" } },
-                    .{ .leaf = .{ .string = "hello" } },
-                } },
+    try std.testing.expectEqualDeep(AstCollection{
+        .asts = &[_]Ast{
+            .{
+                .tree = &.{
+                    .{ .leaf = .{ .identifier = "+" } },
+                    .{ .leaf = .{ .int = 1 } },
+                    .{ .leaf = .{ .float = 2.1 } },
+                    .{ .tree = &.{
+                        .{ .leaf = .{ .identifier = "string-length" } },
+                        .{ .leaf = .{ .string = "hello" } },
+                    } },
+                },
             },
         },
+        .alloc = std.testing.allocator,
     }, ast);
 }
 
 test "multiple expressions can be parsed" {
     var t = tokenizer.Tokenizer.init("1 2.3 four \"five\"");
-    const ast = try Ast.init(&t, std.testing.allocator);
-    defer deinit_slice(ast, std.testing.allocator);
+    var ast = try AstCollection.init(&t, std.testing.allocator);
+    defer ast.deinit();
 
-    try std.testing.expectEqualDeep(&[_]Ast{
-        .{ .leaf = .{ .int = 1 } },
-        .{ .leaf = .{ .float = 2.3 } },
-        .{ .leaf = .{ .identifier = "four" } },
-        .{ .leaf = .{ .string = "five" } },
+    try std.testing.expectEqualDeep(AstCollection{
+        .asts = &[_]Ast{
+            .{ .leaf = .{ .int = 1 } },
+            .{ .leaf = .{ .float = 2.3 } },
+            .{ .leaf = .{ .identifier = "four" } },
+            .{ .leaf = .{ .string = "five" } },
+        },
+        .alloc = std.testing.allocator,
     }, ast);
 }
 
 test "unmatched closing brace is error" {
     var t = tokenizer.Tokenizer.init("())");
-    const ast_or_err = Ast.init(&t, std.testing.allocator);
+    const ast_or_err = AstCollection.init(&t, std.testing.allocator);
     try std.testing.expectError(SyntaxError.UnmatchedCloseParenthesis, ast_or_err);
 }
 
 test "unmatched opening brace is error" {
     var t = tokenizer.Tokenizer.init("(()");
-    const ast_or_err = Ast.init(&t, std.testing.allocator);
+    const ast_or_err = AstCollection.init(&t, std.testing.allocator);
     try std.testing.expectError(SyntaxError.UnclosedParenthesis, ast_or_err);
 }
 
 test "error on second expression is detected" {
     var t = tokenizer.Tokenizer.init("(+ 1 2 3) ))");
-    const ast_or_err = Ast.init(&t, std.testing.allocator);
+    const ast_or_err = AstCollection.init(&t, std.testing.allocator);
     try std.testing.expectError(SyntaxError.UnmatchedCloseParenthesis, ast_or_err);
 }
