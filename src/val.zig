@@ -38,8 +38,7 @@ pub const Val = union(Type) {
 
     /// Create a new Val{.string = ...} that holds a copy of string s.
     pub fn initStr(s: []const u8, alloc: std.mem.Allocator) !Val {
-        const s_copy = try alloc.alloc(u8, s.len);
-        std.mem.copyForwards(u8, s_copy, s);
+        const s_copy = try alloc.dupe(u8, s);
         return .{ .string = s_copy };
     }
 
@@ -60,8 +59,7 @@ pub const Val = union(Type) {
     pub fn clone(self: *const Val, alloc: std.mem.Allocator) !Val {
         switch (self.*) {
             .string => |s| {
-                const new_s = try alloc.alloc(u8, s.len);
-                std.mem.copyForwards(u8, new_s, s);
+                const new_s = try alloc.dupe(u8, s);
                 return .{ .string = new_s };
             },
             else => return self.*,
@@ -73,7 +71,7 @@ pub const Val = union(Type) {
         switch (self.*) {
             .void => try writer.print("void", .{}),
             .symbol => |s| try writer.print("symbol({s})", .{s}),
-            .boolean => |b| try writer.print("{any}", .{b}),
+            .boolean => |b| try writer.print("bool({any})", .{b}),
             .int => |n| try writer.print("int({d})", .{n}),
             .float => |n| try writer.print("float({d})", .{n}),
             .string => |s| try writer.print("string({s})", .{s}),

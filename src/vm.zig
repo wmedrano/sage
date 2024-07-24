@@ -74,7 +74,7 @@ pub const Vm = struct {
         }
         try self.function_frames.append(self.allocator(), .{ .bytecode = bc, .stack_start = 0 });
         while (try self.runNext()) {}
-        const ret = self.stack.popOrNull() orelse Val{ .int = 0 };
+        const ret = self.stack.popOrNull() orelse .void;
         self.clearStack();
         return ret;
     }
@@ -120,8 +120,8 @@ pub const Vm = struct {
 
     /// Execute the deref instruction.
     fn executeDeref(self: *Vm) VmError!void {
-        const v = try switch (self.stack.getLast()) {
-            Val.Type.symbol => |s| self.getSymbol(s) orelse VmError.UndefinedSymbol,
+        const v = switch (self.stack.getLast()) {
+            Val.Type.symbol => |s| self.getSymbol(s) orelse return VmError.UndefinedSymbol,
             else => return VmError.WrongType,
         };
         const cloned_val = try v.clone(self.allocator());
@@ -221,10 +221,6 @@ test "expression can eval" {
 }
 
 test "successful expression clears stack" {
-    const src = "(+ 1 2 3)";
-    const asts = try ast.AstCollection.initWithStr(src, std.testing.allocator);
-    defer asts.deinit();
-
     var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 1 2 3)", std.testing.allocator);
     defer bc.deinit();
 
@@ -252,4 +248,40 @@ test "wrong args halts VM and maintains VM state" {
     try std.testing.expectEqualDeep(vm.function_frames.items, &[_]FunctionFrame{
         .{ .bytecode = &bc, .stack_start = 0, .bytecode_idx = 6 },
     });
+}
+
+test "if expression with true pred returns true branch" {
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if true 1 2)", std.testing.allocator);
+    defer bc.deinit();
+
+    var vm = try Vm.init(std.testing.allocator);
+    defer vm.deinit();
+    var v = try vm.runBytecode(&bc, &[_]Val{});
+    defer v.deinit(vm.allocator());
+
+    try std.testing.expectEqualDeep(Val{ .int = 1 }, v);
+}
+
+test "if expression with false pred returns false branch" {
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1 2)", std.testing.allocator);
+    defer bc.deinit();
+
+    var vm = try Vm.init(std.testing.allocator);
+    defer vm.deinit();
+    var v = try vm.runBytecode(&bc, &[_]Val{});
+    defer v.deinit(vm.allocator());
+
+    try std.testing.expectEqualDeep(Val{ .int = 2 }, v);
+}
+
+test "if expression with false pred and empty false branch returns void" {
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1)", std.testing.allocator);
+    defer bc.deinit();
+
+    var vm = try Vm.init(std.testing.allocator);
+    defer vm.deinit();
+    var v = try vm.runBytecode(&bc, &[_]Val{});
+    defer v.deinit(vm.allocator());
+
+    try std.testing.expectEqualDeep(.void, v);
 }

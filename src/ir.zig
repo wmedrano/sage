@@ -16,15 +16,20 @@ pub const Ir = union(enum) {
         /// The arguments to the function.
         args: []*Ir,
     },
+    /// Construct an if expression.
     if_expr: struct {
+        /// The predicate that will be evaluated.
         predicate: *Ir,
+        /// The block to return on true.
         true_expr: *Ir,
+        /// The block to return on false or null if Val.void should be returned.
         false_expr: ?*Ir,
     },
 
     pub const Error = std.mem.Allocator.Error || error{
         EmptyFunctionCall,
-        TooManyExprs,
+        TooManyArguments,
+        NotEnoughArguments,
         EmptyExpr,
         UnexpectedIf,
         NotImplemented,
@@ -53,7 +58,7 @@ pub const Ir = union(enum) {
         var asts = try AstCollection.initWithStr(expr, alloc);
         defer asts.deinit();
         if (asts.asts.len == 0) return Error.EmptyExpr;
-        if (asts.asts.len > 1) return Error.TooManyExprs;
+        if (asts.asts.len > 1) return Error.TooManyArguments;
         return Ir.init(&asts.asts[0], alloc);
     }
 
@@ -61,7 +66,29 @@ pub const Ir = union(enum) {
     pub fn init(ast: *const Ast, alloc: std.mem.Allocator) !*Ir {
         switch (ast.*) {
             .leaf => return Ir.initConstant(&ast.leaf, alloc),
-            .tree => |asts| return Ir.initFunctionCall(asts, alloc),
+            .tree => |asts| {
+                if (asts.len == 0) {
+                    return Error.EmptyFunctionCall;
+                }
+                const first = &asts[0];
+                const rest = asts[1..];
+                switch (first.*) {
+                    .leaf => |l| {
+                        switch (l) {
+                            .if_expr => {
+                                switch (rest.len) {
+                                    0 | 1 => return Error.NotEnoughArguments,
+                                    2 => return initIfExpression(&rest[0], &rest[1], null, alloc),
+                                    3 => return initIfExpression(&rest[0], &rest[1], &rest[2], alloc),
+                                    else => return Error.TooManyArguments,
+                                }
+                            },
+                            else => return initFunctionCall(first, rest, alloc),
+                        }
+                    },
+                    else => return initFunctionCall(first, rest, alloc),
+                }
+            },
         }
     }
 
@@ -81,26 +108,39 @@ pub const Ir = union(enum) {
     }
 
     /// Initialize an Ir containing a function call.
-    fn initFunctionCall(asts: []const Ast, alloc: std.mem.Allocator) Error!*Ir {
-        if (asts.len == 0) {
-            return Error.EmptyFunctionCall;
-        }
-        if (asts.len > 0) {
-            // TODO: Handle if expression.
-            return Error.NotImplemented;
-        }
-        const function = try init(&asts[0], alloc);
+    fn initFunctionCall(func_ast: *const Ast, args_ast: []const Ast, alloc: std.mem.Allocator) Error!*Ir {
+        const function = try init(func_ast, alloc);
         errdefer function.deinit(alloc);
-        var args = try std.ArrayListUnmanaged(*Ir).initCapacity(alloc, asts.len - 1);
+        var args = try std.ArrayListUnmanaged(*Ir).initCapacity(alloc, args_ast.len);
         errdefer args.deinit(alloc);
         errdefer for (args.items) |*a| a.*.deinit(alloc);
-        for (asts[1..]) |*a| {
-            try args.append(alloc, try init(a, alloc));
+        for (args_ast) |*a| {
+            args.appendAssumeCapacity(try init(a, alloc));
         }
         const ret = try alloc.create(Ir);
         ret.* = .{ .function_call = .{
             .function = function,
             .args = try args.toOwnedSlice(alloc),
+        } };
+        return ret;
+    }
+
+    /// Initialize an Ir containing a function call.
+    fn initIfExpression(pred_expr: *const Ast, true_expr: *const Ast, false_expr: ?*const Ast, alloc: std.mem.Allocator) Error!*Ir {
+        const pred_ir = try init(pred_expr, alloc);
+        errdefer pred_ir.deinit(alloc);
+
+        const true_ir = try init(true_expr, alloc);
+        errdefer true_ir.deinit(alloc);
+
+        const false_ir = if (false_expr) |e| try init(e, alloc) else null;
+        errdefer if (false_ir) |i| i.deinit(alloc);
+
+        const ret = try alloc.create(Ir);
+        ret.* = .{ .if_expr = .{
+            .predicate = pred_ir,
+            .true_expr = true_ir,
+            .false_expr = false_ir,
         } };
         return ret;
     }
@@ -121,5 +161,25 @@ test "parse simple expression" {
             @constCast(&Ir{ .constant = .{ .int = 1 } }),
             @constCast(&Ir{ .constant = .{ .int = 2 } }),
         }),
+    } }, actual);
+}
+
+test "parse if expression" {
+    var actual = try Ir.initStrExpr("(if true 1 2)", std.testing.allocator);
+    defer actual.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(&Ir{ .if_expr = .{
+        .predicate = @constCast(&Ir{ .constant = .{ .boolean = true } }),
+        .true_expr = @constCast(&Ir{ .constant = .{ .int = 1 } }),
+        .false_expr = @constCast(&Ir{ .constant = .{ .int = 2 } }),
+    } }, actual);
+}
+
+test "parse if expression with no false branch" {
+    var actual = try Ir.initStrExpr("(if true 1)", std.testing.allocator);
+    defer actual.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(&Ir{ .if_expr = .{
+        .predicate = @constCast(&Ir{ .constant = .{ .boolean = true } }),
+        .true_expr = @constCast(&Ir{ .constant = .{ .int = 1 } }),
+        .false_expr = null,
     } }, actual);
 }

@@ -45,6 +45,9 @@ pub const Leaf = union(enum) {
         if (std.mem.eql(u8, "false", ident)) {
             return .{ .boolean = false };
         }
+        if (std.mem.eql(u8, "if", ident)) {
+            return .if_expr;
+        }
         if (std.fmt.parseInt(i64, ident, 10)) |i| {
             return .{ .int = i };
         } else |_| {}
@@ -166,7 +169,7 @@ fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
 }
 
 test "basic expression is parsed" {
-    var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\") true false)");
+    var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\") if true false)");
     var ast = try AstCollection.init(&t, std.testing.allocator);
     defer ast.deinit();
 
@@ -181,6 +184,7 @@ test "basic expression is parsed" {
                         .{ .leaf = .{ .identifier = "string-length" } },
                         .{ .leaf = .{ .string = "hello" } },
                     } },
+                    .{ .leaf = .if_expr },
                     .{ .leaf = .{ .boolean = true } },
                     .{ .leaf = .{ .boolean = false } },
                 },
