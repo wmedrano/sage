@@ -1,24 +1,34 @@
 const std = @import("std");
 
 pub const ValType = enum {
+    /// A none value
     void,
+    /// Contains a symbol. These are used for referencing other variables.
     symbol,
+    /// An integer.
     int,
+    /// A float.
     float,
+    /// A mutable string.
     string,
+    /// A function.
     function,
 };
 
 pub const FunctionError = error{ RuntimeError, NotImplemented };
 
+/// Holds a function that may be called with a slice of Val to return a new Val.
 pub const Function = struct {
+    /// The name of the function.
     name: []const u8,
+    /// The implementation of the function.
     function: *const fn ([]Val) FunctionError!Val,
 };
 
 pub const Val = union(ValType) {
+    /// A none value.
     void,
-    // Contains a symbol. The memory allocation for the slice is not managed by Val.
+    // Contains an immutable symbol. The memory allocation for the slice is not managed by Val.
     symbol: []const u8,
     // An integer.
     int: i64,
@@ -29,12 +39,14 @@ pub const Val = union(ValType) {
     // A function. The memory allocation for this is not managed by Val.
     function: *const Function,
 
-    pub fn initStrExpring(s: []const u8, alloc: std.mem.Allocator) !Val {
+    /// Create a new Val{.string = ...} that holds a copy of string s.
+    pub fn initStr(s: []const u8, alloc: std.mem.Allocator) !Val {
         const s_copy = try alloc.alloc(u8, s.len);
         std.mem.copyForwards(u8, s_copy, s);
         return .{ .string = s_copy };
     }
 
+    /// Deallocate any memory associated with Val.
     pub fn deinit(self: Val, alloc: std.mem.Allocator) void {
         switch (self) {
             ValType.void => {},
@@ -46,6 +58,7 @@ pub const Val = union(ValType) {
         }
     }
 
+    /// Clone the Val. alloc is used to deep copy some elements.
     pub fn clone(self: *const Val, alloc: std.mem.Allocator) !Val {
         switch (self.*) {
             ValType.string => |s| {
@@ -57,6 +70,7 @@ pub const Val = union(ValType) {
         }
     }
 
+    /// Pretty print the value.
     pub fn format(self: *const Val, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
             ValType.void => try writer.print("void", .{}),

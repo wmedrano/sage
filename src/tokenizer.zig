@@ -1,10 +1,16 @@
 const std = @import("std");
 
+/// Contains all the types of tokens.
 pub const TokenType = enum {
+    /// A whitespace token. Consists of any sequence of ' ', '\t', and '\n'.
     whitespace,
+    /// Corresponds to the '(' character.
     openParen,
+    /// Corresponds to the ')' character.
     closeParen,
+    /// Any identifier. This includes number literals, but not string literals.
     identifier,
+    /// A string literal. The contents of the Token will contain the start and end quotes.
     string,
 
     // Guess the type of s by looking at the first character.
@@ -24,13 +30,18 @@ pub const TokenType = enum {
     }
 };
 
+/// Holds a token. This contains its classification and its string contents.
 pub const Token = struct {
+    /// The type of the token.
     typ: TokenType,
+    /// The string contents of the token.
     contents: []const u8,
 };
 
 pub const Tokenizer = struct {
+    /// The entire string that will be tokenized.
     contents: []const u8,
+    /// The starting index of the next token to parse.
     idx: usize,
 
     // Create a tokenizer over contents.
@@ -91,7 +102,7 @@ pub const Tokenizer = struct {
         return next_val;
     }
 
-    // Collect all the tokens into an AraryList.
+    // Collect all the tokens into an AraryList. This is typically only used for unit testing.
     pub fn collectAll(self: *Tokenizer, alloc: std.mem.Allocator) std.mem.Allocator.Error!std.ArrayList(Token) {
         var ret = std.ArrayList(Token).init(alloc);
         errdefer ret.deinit();

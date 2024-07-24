@@ -2,29 +2,45 @@ const std = @import("std");
 const tokenizer = @import("tokenizer.zig");
 
 const SyntaxError = error{
+    /// An unclosed parenthesis. Example: (this-is-not-closed
     UnclosedParenthesis,
+    /// There was a close parenthesis with no open parenthesis. Example: this-is-not-closed)
     UnmatchedCloseParenthesis,
+    /// Ran out of memory while parsing the syntax.
     OutOfMemory,
 };
 
+/// The different types of Ast.
 pub const AstType = enum {
+    /// Contains a leaf node. These are usually literals like "1", 1, or one.
     leaf,
+    /// A tree that can contain any number of subtrees or leafs.
     tree,
 };
 
+/// The type of leaf node.
 pub const LeafType = enum {
+    /// An identifier. This usually is a reference to a variable or constant.
     identifier,
+    /// A string literal.
     string,
+    /// An integer literal.
     int,
+    /// A float literal.
     float,
 };
 
 pub const Leaf = union(LeafType) {
+    /// A reference to a variable or constant. The name is stored as a string.
     identifier: []const u8,
+    /// A string literal. The contents (without the literal quotes) are stored as a string.
     string: []const u8,
+    /// An integer literal. The contents are parsed as an i64.
     int: i64,
+    /// A float literal. The contents are parsed as an f64.
     float: f64,
 
+    /// Pretty print the AST.
     pub fn format(self: *const Leaf, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
             LeafType.identifier => |s| try writer.print("identifier({s})", .{s}),
@@ -47,10 +63,16 @@ pub const Leaf = union(LeafType) {
     }
 };
 
+/// Contains an Abstract Syntax Tree. It itself can be a leaf node, or a tree containing any number
+/// of subtrees or leaf nodes.
 pub const Ast = union(AstType) {
+    /// A single leaf node. This is usually a literal or reference to a variable/constant.
     leaf: Leaf,
+    /// A tree. Typically a tree denotes a function call where the first item denotes the function
+    /// and the proceeding items are the arguments.
     tree: []const Ast,
 
+    /// Pretty print the AST.
     pub fn format(self: *const Ast, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         return self.formatImpl(0, writer);
     }
@@ -73,12 +95,15 @@ pub const Ast = union(AstType) {
     }
 };
 
+/// A collection of multiple ASTs.
 pub const AstCollection = struct {
+    /// The ASTs.
     asts: []const Ast,
+    /// The Allocator that was used to allocate the ASTs.
     alloc: std.mem.Allocator,
 
-    // Creates a new Ast. Some fields may reference data returned by the tokenizer. Other items
-    // will use alloc to allocate memory.
+    // Creates a new Ast. Some fields may reference data from the tokenizer. Other items // will use
+    // alloc to allocate memory.
     pub fn init(t: *tokenizer.Tokenizer, alloc: std.mem.Allocator) SyntaxError!AstCollection {
         const asts = try AstCollection.initImpl(t, false, alloc);
         return .{
@@ -87,11 +112,14 @@ pub const AstCollection = struct {
         };
     }
 
+    /// Create a new AstCollection with src as the source code. The created ASTs may reference bytes
+    /// from the src string.
     pub fn initWithStr(src: []const u8, alloc: std.mem.Allocator) SyntaxError!AstCollection {
         var t = tokenizer.Tokenizer.init(src);
         return AstCollection.init(&t, alloc);
     }
 
+    /// Deallocate all ASTs within the collection.
     pub fn deinit(self: AstCollection) void {
         for (self.asts) |*a| deinitAst(a, self.alloc);
         self.alloc.free(self.asts);

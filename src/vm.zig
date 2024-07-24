@@ -4,23 +4,37 @@ const ast = @import("ast.zig");
 const val = @import("val.zig");
 const bytecode = @import("bytecode.zig");
 
+/// Contains details for the current function call.
 const FunctionFrame = struct {
+    /// The bytecode that is being executed.
     bytecode: *const bytecode.ByteCodeFunc,
+    /// The index to the start of the current function's stack.
     stack_start: usize,
+    /// The index to the next instruction to execute within bytecode.
     bytecode_idx: usize = 0,
 };
 
+/// Errors that occur when runnning the VM.
 pub const VmError = std.mem.Allocator.Error || error{
+    /// Something unexpected happened.
     RuntimeError,
+    /// The stack is not as expected. Usually happens when continuing to run the Vm after a failure.
     CorruptStack,
+    /// A function call expected a certain type but got another.
     WrongType,
+    /// A symbol was not defined.
     UndefinedSymbol,
+    /// The functionality is not implemented.
     NotImplemented,
 };
 
 pub const Vm = struct {
+    /// Contains all stack variables in the Vm. A clean execution should start and end with an empty
+    /// stack. If an error occurs, the stack is preserved for further debugging.
     stack: std.ArrayList(val.Val),
+    /// Contains all the function calls with the last element containing the current function call.
     function_frames: std.ArrayListUnmanaged(FunctionFrame),
+    /// Contains all functions that are built in.
     builtin_functions: []const val.Function = &builtin_functions,
 
     /// Initialize a new VM with the given allocator.
@@ -45,7 +59,9 @@ pub const Vm = struct {
         return self.stack.allocator;
     }
 
-    /// Run the bytecode with the given args.
+    /// Run the bytecode with the given args. On successful execution, a Val is returned and the
+    /// stack is reset. On error, the stack will remain as it was in the last error. clearStack may
+    /// be called to continue to reuse the Vm.
     pub fn runBytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []val.Val) VmError!val.Val {
         if (args.len > 0) {
             return VmError.NotImplemented;
@@ -57,7 +73,7 @@ pub const Vm = struct {
             try self.stack.append(try arg.clone(self.allocator()));
         }
         try self.function_frames.append(self.allocator(), .{ .bytecode = bc, .stack_start = 0 });
-        while (try self.run_next()) {}
+        while (try self.runNext()) {}
         const ret = self.stack.popOrNull() orelse val.Val{ .int = 0 };
         self.clearStack();
         return ret;
@@ -80,7 +96,7 @@ pub const Vm = struct {
     }
 
     /// Run the next instruction and return if the Vm should continue executing.
-    fn run_next(self: *Vm) VmError!bool {
+    fn runNext(self: *Vm) VmError!bool {
         if (self.function_frames.items.len == 0) return false;
         const function_frame = &self.function_frames.items[self.function_frames.items.len - 1];
         const instruction = function_frame.bytecode.instructions.items[function_frame.bytecode_idx];

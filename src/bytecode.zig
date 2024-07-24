@@ -11,10 +11,16 @@ const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Val = @import("val.zig").Val;
 const ValType = @import("val.zig").ValType;
 
+/// The instruction to run.
 pub const ByteCodeType = enum {
+    /// Push a constant to the stack.
     push_const,
+    /// Pop the top item in the stack and replace it to the variable it references. The top item
+    /// must by a symbol Val.
     deref,
+    /// Evaluate the top N items in the stack as a function.
     eval,
+    /// Return from the current bytecode frame.
     ret,
 };
 
@@ -33,6 +39,7 @@ pub const ByteCode = union(ByteCodeType) {
     ///   - Pop the function frame.
     ret: void,
 
+    /// Pretty print the instruction.
     pub fn format(self: *const ByteCode, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
             ByteCodeType.push_const => |v| try writer.print("push_const({any})", .{v}),
@@ -44,9 +51,12 @@ pub const ByteCode = union(ByteCodeType) {
 };
 
 pub const ByteCodeFunc = struct {
+    /// Contains the sequence of instructions to run.
     instructions: std.ArrayList(ByteCode),
+    /// Contains all constants. These are referenced by index.
     constants: std.ArrayListUnmanaged(Val),
 
+    /// Create a new ByteCodeFunc from an Ir.
     pub fn init(ir: *const Ir, alloc: std.mem.Allocator) !ByteCodeFunc {
         var instructions = std.ArrayList(ByteCode).init(alloc);
         var constants = std.ArrayListUnmanaged(Val){};
@@ -58,18 +68,21 @@ pub const ByteCodeFunc = struct {
         };
     }
 
+    /// Create a new ByteCodeFunc from a string expression.
     pub fn initStrExpr(expr: []const u8, alloc: std.mem.Allocator) !ByteCodeFunc {
         const ir = try Ir.initStrExpr(expr, alloc);
         defer ir.deinit(alloc);
         return ByteCodeFunc.init(ir, alloc);
     }
 
+    /// Deallocate all memory associated with the ByteCodeFunc.
     pub fn deinit(self: *ByteCodeFunc) void {
         for (self.constants.items) |v| v.deinit(self.instructions.allocator);
         self.constants.deinit(self.instructions.allocator);
         self.instructions.deinit();
     }
 
+    /// Pretty print the bytecode instructions.
     pub fn format(self: *const ByteCodeFunc, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         for (0.., self.instructions.items) |idx, instruction| {
             try writer.print("{d}: {any}\n", .{ idx, instruction });
