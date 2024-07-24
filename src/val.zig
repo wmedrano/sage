@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const ValType = enum {
+    void,
     symbol,
     int,
     float,
@@ -16,6 +17,7 @@ pub const Function = struct {
 };
 
 pub const Val = union(ValType) {
+    void,
     // Contains a symbol. The memory allocation for the slice is not managed by Val.
     symbol: []const u8,
     // An integer.
@@ -27,7 +29,7 @@ pub const Val = union(ValType) {
     // A function. The memory allocation for this is not managed by Val.
     function: *const Function,
 
-    pub fn initString(s: []const u8, alloc: std.mem.Allocator) !Val {
+    pub fn initStrExpring(s: []const u8, alloc: std.mem.Allocator) !Val {
         const s_copy = try alloc.alloc(u8, s.len);
         std.mem.copyForwards(u8, s_copy, s);
         return .{ .string = s_copy };
@@ -35,6 +37,7 @@ pub const Val = union(ValType) {
 
     pub fn deinit(self: Val, alloc: std.mem.Allocator) void {
         switch (self) {
+            ValType.void => {},
             ValType.symbol => {},
             ValType.int => {},
             ValType.float => {},
@@ -56,6 +59,7 @@ pub const Val = union(ValType) {
 
     pub fn format(self: *const Val, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
+            ValType.void => try writer.print("void", .{}),
             ValType.symbol => |s| try writer.print("symbol({s})", .{s}),
             ValType.int => |n| try writer.print("int({d})", .{n}),
             ValType.float => |n| try writer.print("float({d})", .{n}),

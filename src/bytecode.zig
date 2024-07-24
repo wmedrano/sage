@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const Ir = @import("ir.zig").Ir;
+const IrType = @import("ir.zig").IrType;
 const Ast = @import("ast.zig").Ast;
 const AstCollection = @import("ast.zig").AstCollection;
 const AstType = @import("ast.zig").AstType;
@@ -45,15 +47,21 @@ pub const ByteCodeFunc = struct {
     instructions: std.ArrayList(ByteCode),
     constants: std.ArrayListUnmanaged(Val),
 
-    pub fn init(ast: *const Ast, alloc: std.mem.Allocator) !ByteCodeFunc {
+    pub fn init(ir: *const Ir, alloc: std.mem.Allocator) !ByteCodeFunc {
         var instructions = std.ArrayList(ByteCode).init(alloc);
         var constants = std.ArrayListUnmanaged(Val){};
-        try ByteCodeFunc.initImpl(ast, &instructions, &constants);
+        try ByteCodeFunc.initImpl(ir, &instructions, &constants);
         try instructions.append(.ret);
         return .{
             .instructions = instructions,
             .constants = constants,
         };
+    }
+
+    pub fn initStrExpr(expr: []const u8, alloc: std.mem.Allocator) !ByteCodeFunc {
+        const ir = try Ir.initStrExpr(expr, alloc);
+        defer ir.deinit(alloc);
+        return ByteCodeFunc.init(ir, alloc);
     }
 
     pub fn deinit(self: *ByteCodeFunc) void {
@@ -68,10 +76,10 @@ pub const ByteCodeFunc = struct {
         }
     }
 
-    fn initImpl(ast: *const Ast, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
-        switch (ast.*) {
-            AstType.leaf => |*l| {
-                const val = try leafToVal(l, res.allocator);
+    fn initImpl(ir: *const Ir, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
+        switch (ir.*) {
+            IrType.constant => |v| {
+                const val = try v.clone(res.allocator);
                 const val_idx = constants.items.len;
                 try res.append(.{ .push_const = val_idx });
                 try constants.append(res.allocator, val);
@@ -79,9 +87,10 @@ pub const ByteCodeFunc = struct {
                     try res.append(.deref);
                 }
             },
-            AstType.tree => |asts| {
-                for (asts) |*a| try ByteCodeFunc.initImpl(a, res, constants);
-                try res.append(.{ .eval = asts.len });
+            IrType.function_call => |f| {
+                try ByteCodeFunc.initImpl(f.function, res, constants);
+                for (f.args) |a| try ByteCodeFunc.initImpl(a, res, constants);
+                try res.append(.{ .eval = f.args.len + 1 });
             },
         }
     }
@@ -90,19 +99,14 @@ pub const ByteCodeFunc = struct {
 fn leafToVal(l: *const Leaf, alloc: std.mem.Allocator) !Val {
     switch (l.*) {
         LeafType.identifier => return .{ .symbol = l.identifier },
-        LeafType.string => return try Val.initString(l.string, alloc),
+        LeafType.string => return try Val.initStrExpring(l.string, alloc),
         LeafType.int => return .{ .int = l.int },
         LeafType.float => return .{ .float = l.float },
     }
 }
 
 test "push single value" {
-    var t = Tokenizer.init("1");
-    const asts = try AstCollection.init(&t, std.testing.allocator);
-    defer asts.deinit();
-    try std.testing.expectEqual(1, asts.asts.len);
-
-    var actual = try ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
+    var actual = try ByteCodeFunc.initStrExpr("1", std.testing.allocator);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -114,12 +118,7 @@ test "push single value" {
 }
 
 test "evaluate expression" {
-    var t = Tokenizer.init("(+ 1 2 variable)");
-    const asts = try AstCollection.init(&t, std.testing.allocator);
-    defer asts.deinit();
-    try std.testing.expectEqual(1, asts.asts.len);
-
-    var actual = try ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
+    var actual = try ByteCodeFunc.initStrExpr("(+ 1 2 variable)", std.testing.allocator);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },

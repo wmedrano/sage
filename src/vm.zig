@@ -176,11 +176,7 @@ fn addFunction(args: []val.Val) !val.Val {
 }
 
 test "expression can eval" {
-    const src = "(+ (string-length \"four\") -5)";
-    const asts = try ast.AstCollection.initWithStr(src, std.testing.allocator);
-    defer asts.deinit();
-
-    var bc = try bytecode.ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", std.testing.allocator);
     defer bc.deinit();
 
     var vm = try Vm.init(std.testing.allocator);
@@ -198,7 +194,7 @@ test "successful expression clears stack" {
     const asts = try ast.AstCollection.initWithStr(src, std.testing.allocator);
     defer asts.deinit();
 
-    var bc = try bytecode.ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 1 2 3)", std.testing.allocator);
     defer bc.deinit();
 
     var vm = try Vm.init(std.testing.allocator);
@@ -210,11 +206,7 @@ test "successful expression clears stack" {
 }
 
 test "wrong args halts VM and maintains VM state" {
-    const src = "(+ 10 (string-length 4))";
-    const asts = try ast.AstCollection.initWithStr(src, std.testing.allocator);
-    defer asts.deinit();
-
-    var bc = try bytecode.ByteCodeFunc.init(&asts.asts[0], std.testing.allocator);
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 10 (string-length 4))", std.testing.allocator);
     defer bc.deinit();
 
     var vm = try Vm.init(std.testing.allocator);

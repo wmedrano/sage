@@ -2,6 +2,7 @@ const std = @import("std");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const ast = @import("ast.zig");
 const bytecode = @import("bytecode.zig");
+const ir = @import("ir.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -28,17 +29,21 @@ pub fn main() !void {
     tokenizer.reset();
     const asts = try ast.AstCollection.init(&tokenizer, alloc);
     defer asts.deinit();
+    var irs = try std.ArrayList(*ir.Ir).initCapacity(alloc, asts.asts.len);
+    defer irs.deinit();
+    defer for (irs.items) |i| i.deinit(alloc);
     for (1.., asts.asts) |n, a| {
         try bw.writer().print("expression: #{}\n", .{n});
         try bw.writer().print("{any}", .{a});
+        try irs.append(try ir.Ir.init(&a, alloc));
     }
     try bw.writer().print("compile-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
 
     var vm = try @import("vm.zig").Vm.init(alloc);
     defer vm.deinit();
-    for (1.., asts.asts) |n, a| {
+    for (1.., irs.items) |n, i| {
         try bw.writer().print("bytecode: #{}\n", .{n});
-        var bc = try bytecode.ByteCodeFunc.init(&a, alloc);
+        var bc = try bytecode.ByteCodeFunc.init(i, alloc);
         defer bc.deinit();
         try bw.writer().print("{any}", .{bc});
         const expr_result = try vm.runBytecode(&bc, &.{});
