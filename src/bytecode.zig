@@ -96,6 +96,7 @@ pub const ByteCodeFunc = struct {
                 try res.append(.{ .eval = f.args.len + 1 });
             },
             Ir.if_expr => |expr| {
+                try initImpl(expr.predicate, res, constants);
                 // True branch
                 var true_expr_res = std.ArrayList(ByteCode).init(res.allocator);
                 defer true_expr_res.deinit();
@@ -105,7 +106,6 @@ pub const ByteCodeFunc = struct {
                 defer false_expr_res.deinit();
                 try initImpl(if (expr.false_expr) |f| f else &Ir{ .constant = .void }, &false_expr_res, constants);
                 // Make final expression.
-                try initImpl(expr.predicate, res, constants);
                 try res.append(.{ .jump_if = false_expr_res.items.len + 1 });
                 try res.appendSlice(false_expr_res.items);
                 try res.append(.{ .jump = true_expr_res.items.len });
@@ -127,6 +127,10 @@ fn leafToVal(l: *const Leaf, alloc: std.mem.Allocator) !Val {
 fn deinitArrayList(comptime T: type, arr: *std.ArrayList(T)) void {
     for (arr.items) |x| x.deinit(arr.allocator);
     arr.deinit();
+}
+
+test "bytecode size is small" {
+    try std.testing.expectEqual(2 * @sizeOf(usize), @sizeOf(ByteCode));
 }
 
 test "push single value" {
@@ -166,17 +170,17 @@ test "if statement" {
     var actual = try ByteCodeFunc.initStrExpr("(if true 1 2)", std.testing.allocator);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
-        .{ .push_const = 2 },
-        .{ .jump_if = 2 },
-        .{ .push_const = 1 },
-        .{ .jump = 1 },
         .{ .push_const = 0 },
+        .{ .jump_if = 2 },
+        .{ .push_const = 2 },
+        .{ .jump = 1 },
+        .{ .push_const = 1 },
         .ret,
     }, actual.instructions.items);
     try std.testing.expectEqualDeep(&[_]Val{
+        .{ .boolean = true },
         .{ .int = 1 },
         .{ .int = 2 },
-        .{ .boolean = true },
     }, actual.constants.items);
 }
 
@@ -184,16 +188,16 @@ test "if statement without false branch uses void false branch" {
     var actual = try ByteCodeFunc.initStrExpr("(if true 1)", std.testing.allocator);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
-        .{ .push_const = 2 },
-        .{ .jump_if = 2 },
-        .{ .push_const = 1 },
-        .{ .jump = 1 },
         .{ .push_const = 0 },
+        .{ .jump_if = 2 },
+        .{ .push_const = 2 },
+        .{ .jump = 1 },
+        .{ .push_const = 1 },
         .ret,
     }, actual.instructions.items);
     try std.testing.expectEqualDeep(&[_]Val{
+        .{ .boolean = true },
         .{ .int = 1 },
         .void,
-        .{ .boolean = true },
     }, actual.constants.items);
 }

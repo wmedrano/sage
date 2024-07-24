@@ -89,3 +89,8 @@ pub const Val = union(Type) {
         }
     }
 };
+
+test "val size is small" {
+    // TODO: Reduce this to 2 words.
+    try std.testing.expectEqual(3 * @sizeOf(usize), @sizeOf(Val));
+}

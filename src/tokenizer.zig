@@ -1,39 +1,39 @@
 const std = @import("std");
 
-/// Contains all the types of tokens.
-pub const TokenType = enum {
-    /// A whitespace token. Consists of any sequence of ' ', '\t', and '\n'.
-    whitespace,
-    /// Corresponds to the '(' character.
-    openParen,
-    /// Corresponds to the ')' character.
-    closeParen,
-    /// Any identifier. This includes number literals, but not string literals.
-    identifier,
-    /// A string literal. The contents of the Token will contain the start and end quotes.
-    string,
-
-    // Guess the type of s by looking at the first character.
-    pub fn guessType(s: []const u8) TokenType {
-        if (s.len == 1) {
-            return switch (s[0]) {
-                ' ' => return TokenType.whitespace,
-                '\t' => return TokenType.whitespace,
-                '\n' => return TokenType.whitespace,
-                '(' => return TokenType.openParen,
-                ')' => return TokenType.closeParen,
-                '"' => return TokenType.string,
-                else => return TokenType.identifier,
-            };
-        }
-        return TokenType.identifier;
-    }
-};
-
 /// Holds a token. This contains its classification and its string contents.
 pub const Token = struct {
+    /// Contains all the types of tokens.
+    pub const Type = enum {
+        /// A whitespace token. Consists of any sequence of ' ', '\t', and '\n'.
+        whitespace,
+        /// Corresponds to the '(' character.
+        openParen,
+        /// Corresponds to the ')' character.
+        closeParen,
+        /// Any identifier. This includes number literals, but not string literals.
+        identifier,
+        /// A string literal. The contents of the Token will contain the start and end quotes.
+        string,
+
+        // Guess the type of s by looking at the first character.
+        pub fn guessType(s: []const u8) Type {
+            if (s.len == 1) {
+                return switch (s[0]) {
+                    ' ' => return .whitespace,
+                    '\t' => return .whitespace,
+                    '\n' => return .whitespace,
+                    '(' => return .openParen,
+                    ')' => return .closeParen,
+                    '"' => return .string,
+                    else => return .identifier,
+                };
+            }
+            return .identifier;
+        }
+    };
+
     /// The type of the token.
-    typ: TokenType,
+    typ: Type,
     /// The string contents of the token.
     contents: []const u8,
 };
@@ -64,25 +64,25 @@ pub const Tokenizer = struct {
         }
         const start = self.idx;
         var end = start;
-        var token_type = TokenType.whitespace;
+        var token_type = Token.Type.whitespace;
         while (end < self.contents.len) {
             const codepoint_length = std.unicode.utf8ByteSequenceLength(self.contents[0]) catch break;
             const codepoint = self.contents[end .. end + codepoint_length];
             if (start == end) {
-                token_type = TokenType.guessType(codepoint);
+                token_type = Token.Type.guessType(codepoint);
             } else {
-                const new_token_type = TokenType.guessType(codepoint);
+                const new_token_type = Token.Type.guessType(codepoint);
                 switch (token_type) {
-                    TokenType.openParen => break,
-                    TokenType.closeParen => break,
-                    TokenType.string => if (new_token_type == TokenType.string) {
+                    .openParen => break,
+                    .closeParen => break,
+                    .string => if (new_token_type == Token.Type.string) {
                         end += codepoint_length;
                         break;
                     },
-                    TokenType.whitespace => if (new_token_type != TokenType.whitespace) {
+                    .whitespace => if (new_token_type != Token.Type.whitespace) {
                         break;
                     },
-                    TokenType.identifier => if (new_token_type != TokenType.identifier) {
+                    .identifier => if (new_token_type != Token.Type.identifier) {
                         break;
                     },
                 }
@@ -118,12 +118,12 @@ test "parse expression" {
     const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{
-        .{ .typ = TokenType.whitespace, .contents = " " },
-        .{ .typ = TokenType.openParen, .contents = "(" },
-        .{ .typ = TokenType.identifier, .contents = "parse-expression-1" },
-        .{ .typ = TokenType.whitespace, .contents = "  " },
-        .{ .typ = TokenType.identifier, .contents = "234" },
-        .{ .typ = TokenType.closeParen, .contents = ")" },
+        .{ .typ = .whitespace, .contents = " " },
+        .{ .typ = .openParen, .contents = "(" },
+        .{ .typ = .identifier, .contents = "parse-expression-1" },
+        .{ .typ = .whitespace, .contents = "  " },
+        .{ .typ = .identifier, .contents = "234" },
+        .{ .typ = .closeParen, .contents = ")" },
     }, result.items);
 }
 
@@ -132,12 +132,12 @@ test "parse with duplicate tokens" {
     const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{
-        .{ .typ = TokenType.whitespace, .contents = "  \t\n" },
-        .{ .typ = TokenType.openParen, .contents = "(" },
-        .{ .typ = TokenType.openParen, .contents = "(" },
-        .{ .typ = TokenType.closeParen, .contents = ")" },
-        .{ .typ = TokenType.closeParen, .contents = ")" },
-        .{ .typ = TokenType.string, .contents = "\"\"" },
+        .{ .typ = .whitespace, .contents = "  \t\n" },
+        .{ .typ = .openParen, .contents = "(" },
+        .{ .typ = .openParen, .contents = "(" },
+        .{ .typ = .closeParen, .contents = ")" },
+        .{ .typ = .closeParen, .contents = ")" },
+        .{ .typ = .string, .contents = "\"\"" },
     }, result.items);
 }
 
@@ -146,9 +146,9 @@ test "parse string" {
     const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{
-        .{ .typ = TokenType.openParen, .contents = "(" },
-        .{ .typ = TokenType.string, .contents = "\"(this is a string)\"" },
-        .{ .typ = TokenType.closeParen, .contents = ")" },
+        .{ .typ = .openParen, .contents = "(" },
+        .{ .typ = .string, .contents = "\"(this is a string)\"" },
+        .{ .typ = .closeParen, .contents = ")" },
     }, result.items);
 }
 

@@ -1,5 +1,5 @@
 const std = @import("std");
-const tokenizer = @import("tokenizer.zig");
+const Tokenizer = @import("tokenizer.zig").Tokenizer;
 
 const SyntaxError = error{
     /// An unclosed parenthesis. Example: (this-is-not-closed
@@ -99,7 +99,7 @@ pub const AstCollection = struct {
 
     // Creates a new Ast. Some fields may reference data from the tokenizer. Other items // will use
     // alloc to allocate memory.
-    pub fn init(t: *tokenizer.Tokenizer, alloc: std.mem.Allocator) SyntaxError!AstCollection {
+    pub fn init(t: *Tokenizer, alloc: std.mem.Allocator) SyntaxError!AstCollection {
         const asts = try AstCollection.initImpl(t, false, alloc);
         return .{
             .asts = asts,
@@ -110,7 +110,7 @@ pub const AstCollection = struct {
     /// Create a new AstCollection with src as the source code. The created ASTs may reference bytes
     /// from the src string.
     pub fn initWithStr(src: []const u8, alloc: std.mem.Allocator) SyntaxError!AstCollection {
-        var t = tokenizer.Tokenizer.init(src);
+        var t = Tokenizer.init(src);
         return AstCollection.init(&t, alloc);
     }
 
@@ -120,29 +120,29 @@ pub const AstCollection = struct {
         self.alloc.free(self.asts);
     }
 
-    fn initImpl(t: *tokenizer.Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
+    fn initImpl(t: *Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
         var result = std.ArrayList(Ast).init(alloc);
         defer result.deinit();
         errdefer for (result.items) |*a| deinitAst(a, alloc);
         var has_close = false;
         while (t.next()) |token| {
             switch (token.typ) {
-                tokenizer.TokenType.whitespace => continue,
-                tokenizer.TokenType.openParen => {
+                .whitespace => continue,
+                .openParen => {
                     const sub_asts = try AstCollection.initImpl(t, true, alloc);
                     try result.append(.{ .tree = sub_asts });
                 },
-                tokenizer.TokenType.closeParen => {
+                .closeParen => {
                     if (!want_close) {
                         return SyntaxError.UnmatchedCloseParenthesis;
                     }
                     has_close = true;
                     break;
                 },
-                tokenizer.TokenType.identifier => {
+                .identifier => {
                     try result.append(.{ .leaf = Leaf.fromIdentifier(token.contents) });
                 },
-                tokenizer.TokenType.string => {
+                .string => {
                     const s = token.contents[1 .. token.contents.len - 1];
                     const string = Leaf{ .string = s };
                     try result.append(.{ .leaf = string });
@@ -169,7 +169,7 @@ fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
 }
 
 test "basic expression is parsed" {
-    var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\") (if true 10) (if false 11 12))");
+    var t = Tokenizer.init("(+ 1 2.1 (string-length \"hello\") (if true 10) (if false 11 12))");
     var ast = try AstCollection.init(&t, std.testing.allocator);
     defer ast.deinit();
 
@@ -203,7 +203,7 @@ test "basic expression is parsed" {
 }
 
 test "multiple expressions can be parsed" {
-    var t = tokenizer.Tokenizer.init("1 2.3 four \"five\"");
+    var t = Tokenizer.init("1 2.3 four \"five\"");
     var ast = try AstCollection.init(&t, std.testing.allocator);
     defer ast.deinit();
 
@@ -219,19 +219,19 @@ test "multiple expressions can be parsed" {
 }
 
 test "unmatched closing brace is error" {
-    var t = tokenizer.Tokenizer.init("())");
+    var t = Tokenizer.init("())");
     const ast_or_err = AstCollection.init(&t, std.testing.allocator);
     try std.testing.expectError(SyntaxError.UnmatchedCloseParenthesis, ast_or_err);
 }
 
 test "unmatched opening brace is error" {
-    var t = tokenizer.Tokenizer.init("(()");
+    var t = Tokenizer.init("(()");
     const ast_or_err = AstCollection.init(&t, std.testing.allocator);
     try std.testing.expectError(SyntaxError.UnclosedParenthesis, ast_or_err);
 }
 
 test "error on second expression is detected" {
-    var t = tokenizer.Tokenizer.init("(+ 1 2 3) ))");
+    var t = Tokenizer.init("(+ 1 2 3) ))");
     const ast_or_err = AstCollection.init(&t, std.testing.allocator);
     try std.testing.expectError(SyntaxError.UnmatchedCloseParenthesis, ast_or_err);
 }
