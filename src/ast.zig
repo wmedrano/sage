@@ -11,10 +11,14 @@ const SyntaxError = error{
 };
 
 pub const Leaf = union(enum) {
+    /// An if expression.
+    if_expr,
     /// A reference to a variable or constant. The name is stored as a string.
     identifier: []const u8,
     /// A string literal. The contents (without the literal quotes) are stored as a string.
     string: []const u8,
+    /// A boolean literal.
+    boolean: bool,
     /// An integer literal. The contents are parsed as an i64.
     int: i64,
     /// A float literal. The contents are parsed as an f64.
@@ -23,8 +27,10 @@ pub const Leaf = union(enum) {
     /// Pretty print the AST.
     pub fn format(self: *const Leaf, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
+            .if_expr => try writer.print("if", .{}),
             .identifier => |s| try writer.print("identifier({s})", .{s}),
             .string => |s| try writer.print("string({s})", .{s}),
+            .boolean => |b| try writer.print("{any}", .{b}),
             .int => |n| try writer.print("int({})", .{n}),
             .float => |n| try writer.print("float({})", .{n}),
         }
@@ -33,6 +39,15 @@ pub const Leaf = union(enum) {
     // Parse a leaf from an identifier. If the identifier matches a number, then it is parsed into
     // an int or float Leaf.
     pub fn fromIdentifier(ident: []const u8) Leaf {
+        if (std.mem.eql(u8, "true", ident)) {
+            return .{ .boolean = true };
+        }
+        if (std.mem.eql(u8, "false", ident)) {
+            return .{ .boolean = false };
+        }
+        if (std.mem.eql(u8, "if", ident)) {
+            return .if_expr;
+        }
         if (std.fmt.parseInt(i64, ident, 10)) |i| {
             return .{ .int = i };
         } else |_| {}
@@ -154,7 +169,7 @@ fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
 }
 
 test "basic expression is parsed" {
-    var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\"))");
+    var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\") if true false)");
     var ast = try AstCollection.init(&t, std.testing.allocator);
     defer ast.deinit();
 
@@ -169,6 +184,9 @@ test "basic expression is parsed" {
                         .{ .leaf = .{ .identifier = "string-length" } },
                         .{ .leaf = .{ .string = "hello" } },
                     } },
+                    .{ .leaf = .if_expr },
+                    .{ .leaf = .{ .boolean = true } },
+                    .{ .leaf = .{ .boolean = false } },
                 },
             },
         },

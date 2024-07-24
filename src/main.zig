@@ -35,7 +35,7 @@ pub fn main() !void {
     for (1.., asts.asts) |n, a| {
         try bw.writer().print("expression: #{}\n", .{n});
         try bw.writer().print("{any}", .{a});
-        try irs.append(try ir.Ir.init(&a, alloc));
+        irs.appendAssumeCapacity(try ir.Ir.init(&a, alloc));
     }
     try bw.writer().print("compile-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
 
@@ -47,6 +47,7 @@ pub fn main() !void {
         defer bc.deinit();
         try bw.writer().print("{any}", .{bc});
         const expr_result = try vm.runBytecode(&bc, &.{});
+        defer expr_result.deinit(alloc);
         try bw.writer().print("result: {any}", .{expr_result});
     }
     try bw.writer().print("\nruntime-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
