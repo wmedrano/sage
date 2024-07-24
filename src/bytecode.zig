@@ -1,30 +1,14 @@
 const std = @import("std");
 
 const Ir = @import("ir.zig").Ir;
-const IrType = @import("ir.zig").IrType;
 const Ast = @import("ast.zig").Ast;
 const AstCollection = @import("ast.zig").AstCollection;
 const AstType = @import("ast.zig").AstType;
 const Leaf = @import("ast.zig").Leaf;
-const LeafType = @import("ast.zig").LeafType;
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Val = @import("val.zig").Val;
-const ValType = @import("val.zig").ValType;
 
-/// The instruction to run.
-pub const ByteCodeType = enum {
-    /// Push a constant to the stack.
-    push_const,
-    /// Pop the top item in the stack and replace it to the variable it references. The top item
-    /// must by a symbol Val.
-    deref,
-    /// Evaluate the top N items in the stack as a function.
-    eval,
-    /// Return from the current bytecode frame.
-    ret,
-};
-
-pub const ByteCode = union(ByteCodeType) {
+pub const ByteCode = union(enum) {
     /// Push a constant to the stack. Contains the index to the constant within the constants array.
     push_const: usize,
     /// Replace the top symbol value in the stack with its real value.
@@ -42,10 +26,10 @@ pub const ByteCode = union(ByteCodeType) {
     /// Pretty print the instruction.
     pub fn format(self: *const ByteCode, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
-            ByteCodeType.push_const => |v| try writer.print("push_const({any})", .{v}),
-            ByteCodeType.deref => try writer.print("deref", .{}),
-            ByteCodeType.eval => |n| try writer.print("eval({})", .{n}),
-            ByteCodeType.ret => try writer.print("return", .{}),
+            .push_const => |v| try writer.print("push_const({any})", .{v}),
+            .deref => try writer.print("deref", .{}),
+            .eval => |n| try writer.print("eval({})", .{n}),
+            .ret => try writer.print("return", .{}),
         }
     }
 };
@@ -91,16 +75,16 @@ pub const ByteCodeFunc = struct {
 
     fn initImpl(ir: *const Ir, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
         switch (ir.*) {
-            IrType.constant => |v| {
+            Ir.constant => |v| {
                 const val = try v.clone(res.allocator);
                 const val_idx = constants.items.len;
                 try res.append(.{ .push_const = val_idx });
                 try constants.append(res.allocator, val);
-                if (@as(ValType, val) == ValType.symbol) {
+                if (@as(Val.Type, val) == Val.Type.symbol) {
                     try res.append(.deref);
                 }
             },
-            IrType.function_call => |f| {
+            Ir.function_call => |f| {
                 try ByteCodeFunc.initImpl(f.function, res, constants);
                 for (f.args) |a| try ByteCodeFunc.initImpl(a, res, constants);
                 try res.append(.{ .eval = f.args.len + 1 });
@@ -111,10 +95,10 @@ pub const ByteCodeFunc = struct {
 
 fn leafToVal(l: *const Leaf, alloc: std.mem.Allocator) !Val {
     switch (l.*) {
-        LeafType.identifier => return .{ .symbol = l.identifier },
-        LeafType.string => return try Val.initStrExpring(l.string, alloc),
-        LeafType.int => return .{ .int = l.int },
-        LeafType.float => return .{ .float = l.float },
+        Leaf.identifier => return .{ .symbol = l.identifier },
+        Leaf.string => return try Val.initStrExpring(l.string, alloc),
+        Leaf.int => return .{ .int = l.int },
+        Leaf.float => return .{ .float = l.float },
     }
 }
 

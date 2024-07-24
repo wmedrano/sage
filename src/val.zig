@@ -1,31 +1,25 @@
 const std = @import("std");
 
-pub const ValType = enum {
-    /// A none value
-    void,
-    /// Contains a symbol. These are used for referencing other variables.
-    symbol,
-    /// An integer.
-    int,
-    /// A float.
-    float,
-    /// A mutable string.
-    string,
-    /// A function.
-    function,
-};
-
 pub const FunctionError = error{ RuntimeError, NotImplemented };
 
-/// Holds a function that may be called with a slice of Val to return a new Val.
-pub const Function = struct {
-    /// The name of the function.
-    name: []const u8,
-    /// The implementation of the function.
-    function: *const fn ([]Val) FunctionError!Val,
-};
+pub const Val = union(Type) {
+    pub const Type = enum {
+        void,
+        symbol,
+        int,
+        float,
+        string,
+        function,
+    };
 
-pub const Val = union(ValType) {
+    /// Holds a function that may be called with a slice of Val to return a new Val.
+    pub const Function = struct {
+        /// The name of the function.
+        name: []const u8,
+        /// The implementation of the function.
+        function: *const fn ([]Val) FunctionError!Val,
+    };
+
     /// A none value.
     void,
     // Contains an immutable symbol. The memory allocation for the slice is not managed by Val.
@@ -49,19 +43,19 @@ pub const Val = union(ValType) {
     /// Deallocate any memory associated with Val.
     pub fn deinit(self: Val, alloc: std.mem.Allocator) void {
         switch (self) {
-            ValType.void => {},
-            ValType.symbol => {},
-            ValType.int => {},
-            ValType.float => {},
-            ValType.string => alloc.free(self.string),
-            ValType.function => {},
+            .void => {},
+            .symbol => {},
+            .int => {},
+            .float => {},
+            .string => alloc.free(self.string),
+            .function => {},
         }
     }
 
     /// Clone the Val. alloc is used to deep copy some elements.
     pub fn clone(self: *const Val, alloc: std.mem.Allocator) !Val {
         switch (self.*) {
-            ValType.string => |s| {
+            .string => |s| {
                 const new_s = try alloc.alloc(u8, s.len);
                 std.mem.copyForwards(u8, new_s, s);
                 return .{ .string = new_s };
@@ -73,12 +67,12 @@ pub const Val = union(ValType) {
     /// Pretty print the value.
     pub fn format(self: *const Val, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
-            ValType.void => try writer.print("void", .{}),
-            ValType.symbol => |s| try writer.print("symbol({s})", .{s}),
-            ValType.int => |n| try writer.print("int({d})", .{n}),
-            ValType.float => |n| try writer.print("float({d})", .{n}),
-            ValType.string => |s| try writer.print("string({s})", .{s}),
-            ValType.function => |f| try writer.print("function({s})", .{f.name}),
+            .void => try writer.print("void", .{}),
+            .symbol => |s| try writer.print("symbol({s})", .{s}),
+            .int => |n| try writer.print("int({d})", .{n}),
+            .float => |n| try writer.print("float({d})", .{n}),
+            .string => |s| try writer.print("string({s})", .{s}),
+            .function => |f| try writer.print("function({s})", .{f.name}),
         }
     }
 };

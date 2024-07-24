@@ -10,27 +10,7 @@ const SyntaxError = error{
     OutOfMemory,
 };
 
-/// The different types of Ast.
-pub const AstType = enum {
-    /// Contains a leaf node. These are usually literals like "1", 1, or one.
-    leaf,
-    /// A tree that can contain any number of subtrees or leafs.
-    tree,
-};
-
-/// The type of leaf node.
-pub const LeafType = enum {
-    /// An identifier. This usually is a reference to a variable or constant.
-    identifier,
-    /// A string literal.
-    string,
-    /// An integer literal.
-    int,
-    /// A float literal.
-    float,
-};
-
-pub const Leaf = union(LeafType) {
+pub const Leaf = union(enum) {
     /// A reference to a variable or constant. The name is stored as a string.
     identifier: []const u8,
     /// A string literal. The contents (without the literal quotes) are stored as a string.
@@ -43,10 +23,10 @@ pub const Leaf = union(LeafType) {
     /// Pretty print the AST.
     pub fn format(self: *const Leaf, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
-            LeafType.identifier => |s| try writer.print("identifier({s})", .{s}),
-            LeafType.string => |s| try writer.print("string({s})", .{s}),
-            LeafType.int => |n| try writer.print("int({})", .{n}),
-            LeafType.float => |n| try writer.print("float({})", .{n}),
+            .identifier => |s| try writer.print("identifier({s})", .{s}),
+            .string => |s| try writer.print("string({s})", .{s}),
+            .int => |n| try writer.print("int({})", .{n}),
+            .float => |n| try writer.print("float({})", .{n}),
         }
     }
 
@@ -65,7 +45,7 @@ pub const Leaf = union(LeafType) {
 
 /// Contains an Abstract Syntax Tree. It itself can be a leaf node, or a tree containing any number
 /// of subtrees or leaf nodes.
-pub const Ast = union(AstType) {
+pub const Ast = union(enum) {
     /// A single leaf node. This is usually a literal or reference to a variable/constant.
     leaf: Leaf,
     /// A tree. Typically a tree denotes a function call where the first item denotes the function
@@ -79,13 +59,13 @@ pub const Ast = union(AstType) {
 
     fn formatImpl(self: *const Ast, indent: u8, writer: anytype) !void {
         switch (self.*) {
-            AstType.leaf => |l| {
+            .leaf => |l| {
                 for (0..indent) |_| {
                     try writer.print("  ", .{});
                 }
                 try writer.print("{any}\n", .{l});
             },
-            AstType.tree => |elements| {
+            .tree => |elements| {
                 for (0.., elements) |idx, e| {
                     const new_indent = if (idx == 0) indent else indent + 1;
                     try e.formatImpl(new_indent, writer);
@@ -163,8 +143,8 @@ pub const AstCollection = struct {
 
 fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
     switch (ast.*) {
-        AstType.leaf => {},
-        AstType.tree => |tree| {
+        Ast.leaf => {},
+        Ast.tree => |tree| {
             for (tree) |*node| {
                 deinitAst(node, alloc);
             }

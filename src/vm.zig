@@ -1,7 +1,7 @@
 const std = @import("std");
 const tokenizer = @import("tokenizer.zig");
 const ast = @import("ast.zig");
-const val = @import("val.zig");
+const Val = @import("val.zig").Val;
 const bytecode = @import("bytecode.zig");
 
 /// Contains details for the current function call.
@@ -14,7 +14,7 @@ const FunctionFrame = struct {
     bytecode_idx: usize = 0,
 };
 
-/// Errors that occur when runnning the VM.
+/// Errors that occur when running the VM.
 pub const VmError = std.mem.Allocator.Error || error{
     /// Something unexpected happened.
     RuntimeError,
@@ -31,15 +31,15 @@ pub const VmError = std.mem.Allocator.Error || error{
 pub const Vm = struct {
     /// Contains all stack variables in the Vm. A clean execution should start and end with an empty
     /// stack. If an error occurs, the stack is preserved for further debugging.
-    stack: std.ArrayList(val.Val),
+    stack: std.ArrayList(Val),
     /// Contains all the function calls with the last element containing the current function call.
     function_frames: std.ArrayListUnmanaged(FunctionFrame),
     /// Contains all functions that are built in.
-    builtin_functions: []const val.Function = &builtin_functions,
+    builtin_functions: []const Val.Function = &builtin_functions,
 
     /// Initialize a new VM with the given allocator.
     pub fn init(alloc: std.mem.Allocator) VmError!Vm {
-        const stack = try std.ArrayList(val.Val).initCapacity(alloc, 1024);
+        const stack = try std.ArrayList(Val).initCapacity(alloc, 1024);
         const function_frames = try std.ArrayListUnmanaged(FunctionFrame).initCapacity(alloc, 1024);
         return .{
             .stack = stack,
@@ -62,7 +62,7 @@ pub const Vm = struct {
     /// Run the bytecode with the given args. On successful execution, a Val is returned and the
     /// stack is reset. On error, the stack will remain as it was in the last error. clearStack may
     /// be called to continue to reuse the Vm.
-    pub fn runBytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []val.Val) VmError!val.Val {
+    pub fn runBytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []Val) VmError!Val {
         if (args.len > 0) {
             return VmError.NotImplemented;
         }
@@ -74,7 +74,7 @@ pub const Vm = struct {
         }
         try self.function_frames.append(self.allocator(), .{ .bytecode = bc, .stack_start = 0 });
         while (try self.runNext()) {}
-        const ret = self.stack.popOrNull() orelse val.Val{ .int = 0 };
+        const ret = self.stack.popOrNull() orelse Val{ .int = 0 };
         self.clearStack();
         return ret;
     }
@@ -86,10 +86,10 @@ pub const Vm = struct {
     }
 
     /// Get the given symbol or null if it is not defined in the global scope.
-    fn getSymbol(self: *Vm, symbol: []const u8) ?val.Val {
+    fn getSymbol(self: *Vm, symbol: []const u8) ?Val {
         for (self.builtin_functions) |*f| {
             if (std.mem.eql(u8, symbol, f.name)) {
-                return val.Val{ .function = f };
+                return Val{ .function = f };
             }
         }
         return null;
@@ -101,10 +101,10 @@ pub const Vm = struct {
         const function_frame = &self.function_frames.items[self.function_frames.items.len - 1];
         const instruction = function_frame.bytecode.instructions.items[function_frame.bytecode_idx];
         switch (instruction) {
-            bytecode.ByteCodeType.push_const => |i| try self.executePushConst(function_frame.bytecode, i),
-            bytecode.ByteCodeType.deref => try self.executeDeref(),
-            bytecode.ByteCodeType.eval => |n| try self.executeEval(n),
-            bytecode.ByteCodeType.ret => try self.executeRet(),
+            .push_const => |i| try self.executePushConst(function_frame.bytecode, i),
+            .deref => try self.executeDeref(),
+            .eval => |n| try self.executeEval(n),
+            .ret => try self.executeRet(),
         }
         function_frame.bytecode_idx += 1;
         return true;
@@ -119,7 +119,7 @@ pub const Vm = struct {
     /// Execute the deref instruction.
     fn executeDeref(self: *Vm) VmError!void {
         const v = try switch (self.stack.getLast()) {
-            val.ValType.symbol => |s| self.getSymbol(s) orelse VmError.UndefinedSymbol,
+            Val.Type.symbol => |s| self.getSymbol(s) orelse VmError.UndefinedSymbol,
             else => return VmError.WrongType,
         };
         const cloned_val = try v.clone(self.allocator());
@@ -132,7 +132,7 @@ pub const Vm = struct {
         const function_idx = self.stack.items.len - n;
         const stack = self.stack.items[function_idx + 1 ..];
         switch (self.stack.items[function_idx]) {
-            val.ValType.function => |f| {
+            Val.Type.function => |f| {
                 const res = try f.function(stack);
                 for (self.stack.items[function_idx..]) |v| v.deinit(self.allocator());
                 try self.stack.resize(function_idx);
@@ -156,32 +156,32 @@ pub const Vm = struct {
     }
 };
 
-const builtin_functions = [_]val.Function{
+const builtin_functions = [_]Val.Function{
     .{ .name = "+", .function = addFunction },
     .{ .name = "string-length", .function = stringLengthFunction },
 };
 
-fn stringLengthFunction(args: []val.Val) !val.Val {
+fn stringLengthFunction(args: []Val) !Val {
     if (args.len != 1) {
         return error.RuntimeError;
     }
     switch (args[0]) {
-        val.ValType.string => |s| return .{ .int = @intCast(s.len) },
+        Val.Type.string => |s| return .{ .int = @intCast(s.len) },
         else => return error.RuntimeError,
     }
 }
 
-fn addFunction(args: []val.Val) !val.Val {
+fn addFunction(args: []Val) !Val {
     var int_sum: i64 = 0;
     var float_sum: f64 = 0.0;
     var has_float = false;
     for (args) |arg| {
         switch (arg) {
-            val.ValType.float => |f| {
+            Val.Type.float => |f| {
                 has_float = true;
                 float_sum += f;
             },
-            val.ValType.int => |i| int_sum += i,
+            Val.Type.int => |i| int_sum += i,
             else => return error.RuntimeError,
         }
     }
@@ -197,10 +197,10 @@ test "expression can eval" {
 
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    const actual = try vm.runBytecode(&bc, &[_]val.Val{});
+    const actual = try vm.runBytecode(&bc, &[_]Val{});
     defer actual.deinit(vm.allocator());
     try std.testing.expectEqualDeep(
-        val.Val{ .int = -1 },
+        Val{ .int = -1 },
         actual,
     );
 }
@@ -215,10 +215,10 @@ test "successful expression clears stack" {
 
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var v = try vm.runBytecode(&bc, &[_]val.Val{});
+    var v = try vm.runBytecode(&bc, &[_]Val{});
     defer v.deinit(vm.allocator());
 
-    try std.testing.expectEqualDeep(vm.stack.items, &[_]val.Val{});
+    try std.testing.expectEqualDeep(vm.stack.items, &[_]Val{});
 }
 
 test "wrong args halts VM and maintains VM state" {
@@ -227,8 +227,8 @@ test "wrong args halts VM and maintains VM state" {
 
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    try std.testing.expectError(error.RuntimeError, vm.runBytecode(&bc, &[_]val.Val{}));
-    try std.testing.expectEqualDeep(vm.stack.items, &[_]val.Val{
+    try std.testing.expectError(error.RuntimeError, vm.runBytecode(&bc, &[_]Val{}));
+    try std.testing.expectEqualDeep(vm.stack.items, &[_]Val{
         vm.getSymbol("+") orelse return error.SymbolNotFound,
         .{ .int = 10 },
         vm.getSymbol("string-length") orelse return error.SymbolNotFound,

@@ -2,21 +2,11 @@ const std = @import("std");
 const Val = @import("val.zig").Val;
 const Ast = @import("ast.zig").Ast;
 const AstCollection = @import("ast.zig").AstCollection;
-const AstType = @import("ast.zig").AstType;
 const Leaf = @import("ast.zig").Leaf;
-const LeafType = @import("ast.zig").LeafType;
-
-/// The type for the intermediate representation.
-pub const IrType = enum {
-    /// A single constant value.
-    constant,
-    /// A function call.
-    function_call,
-};
 
 /// Holds the intermediate representation. This is somewhere between the AST and bytecode in level
 /// of complexity.
-pub const Ir = union(IrType) {
+pub const Ir = union(enum) {
     /// A single constant value.
     constant: Val,
     /// A function call.
@@ -32,8 +22,8 @@ pub const Ir = union(IrType) {
     /// Deallocate Ir and all related memory.
     pub fn deinit(self: *Ir, alloc: std.mem.Allocator) void {
         switch (self.*) {
-            IrType.constant => self.constant.deinit(alloc),
-            IrType.function_call => |*f| {
+            .constant => self.constant.deinit(alloc),
+            .function_call => |*f| {
                 f.function.deinit(alloc);
                 for (f.args) |*a| a.*.deinit(alloc);
                 alloc.free(f.args);
@@ -54,18 +44,18 @@ pub const Ir = union(IrType) {
     /// Initialize an Ir from an AST.
     pub fn init(ast: *const Ast, alloc: std.mem.Allocator) !*Ir {
         switch (ast.*) {
-            AstType.leaf => return Ir.initConstant(&ast.leaf, alloc),
-            AstType.tree => |asts| return Ir.initFunctionCall(asts, alloc),
+            .leaf => return Ir.initConstant(&ast.leaf, alloc),
+            .tree => |asts| return Ir.initFunctionCall(asts, alloc),
         }
     }
 
     /// Initialize an Ir from a single AST leaf.
     fn initConstant(leaf: *const Leaf, alloc: std.mem.Allocator) Error!*Ir {
         const v = switch (leaf.*) {
-            LeafType.identifier => Val{ .symbol = leaf.identifier },
-            LeafType.string => try Val.initStr(leaf.string, alloc),
-            LeafType.int => Val{ .int = leaf.int },
-            LeafType.float => Val{ .float = leaf.float },
+            Leaf.identifier => Val{ .symbol = leaf.identifier },
+            Leaf.string => try Val.initStr(leaf.string, alloc),
+            Leaf.int => Val{ .int = leaf.int },
+            Leaf.float => Val{ .float = leaf.float },
         };
         const ret = try alloc.create(Ir);
         ret.* = .{ .constant = v };
