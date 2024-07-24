@@ -6,6 +6,7 @@ pub const Val = union(Type) {
     pub const Type = enum {
         void,
         symbol,
+        boolean,
         int,
         float,
         string,
@@ -22,15 +23,17 @@ pub const Val = union(Type) {
 
     /// A none value.
     void,
-    // Contains an immutable symbol. The memory allocation for the slice is not managed by Val.
+    /// Contains an immutable symbol. The memory allocation for the slice is not managed by Val.
     symbol: []const u8,
-    // An integer.
+    /// A bool.
+    boolean: bool,
+    /// An integer.
     int: i64,
-    // A float.
+    /// A float.
     float: f64,
-    // A mutable string.
+    /// A mutable string.
     string: []u8,
-    // A function. The memory allocation for this is not managed by Val.
+    /// A function. The memory allocation for this is not managed by Val.
     function: *const Function,
 
     /// Create a new Val{.string = ...} that holds a copy of string s.
@@ -45,6 +48,7 @@ pub const Val = union(Type) {
         switch (self) {
             .void => {},
             .symbol => {},
+            .boolean => {},
             .int => {},
             .float => {},
             .string => alloc.free(self.string),
@@ -69,10 +73,21 @@ pub const Val = union(Type) {
         switch (self.*) {
             .void => try writer.print("void", .{}),
             .symbol => |s| try writer.print("symbol({s})", .{s}),
+            .boolean => |b| try writer.print("{any}", .{b}),
             .int => |n| try writer.print("int({d})", .{n}),
             .float => |n| try writer.print("float({d})", .{n}),
             .string => |s| try writer.print("string({s})", .{s}),
             .function => |f| try writer.print("function({s})", .{f.name}),
+        }
+    }
+
+    /// Returns true if the val is considered truthy. All values except for void and false are
+    /// considered truthy.
+    pub fn isTruthy(self: *const Val) bool {
+        switch (self.*) {
+            .void => return false,
+            .boolean => |b| return b,
+            else => return true,
         }
     }
 };

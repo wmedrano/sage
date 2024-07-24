@@ -49,7 +49,7 @@ pub const Vm = struct {
 
     /// Deinitialize the VM. This deallocates the VM's allocated memory.
     pub fn deinit(self: *Vm) void {
-        for (self.stack.items) |v| v.deinit(self.allocator());
+        for (self.stack.items) |x| x.deinit(self.allocator());
         self.stack.deinit();
         self.function_frames.deinit(self.allocator());
     }
@@ -104,6 +104,8 @@ pub const Vm = struct {
             .push_const => |i| try self.executePushConst(function_frame.bytecode, i),
             .deref => try self.executeDeref(),
             .eval => |n| try self.executeEval(n),
+            .jump => |n| self.executeJump(n),
+            .jump_if => |n| self.executeJumpIf(n),
             .ret => try self.executeRet(),
         }
         function_frame.bytecode_idx += 1;
@@ -139,6 +141,19 @@ pub const Vm = struct {
                 try self.stack.append(res);
             },
             else => return VmError.WrongType,
+        }
+    }
+
+    /// Execute the jump instruction.
+    fn executeJump(self: *Vm, n: usize) void {
+        self.function_frames.items[self.function_frames.items.len - 1].bytecode_idx += n;
+    }
+
+    /// Execute the jump_if instruction.
+    fn executeJumpIf(self: *Vm, n: usize) void {
+        const pred_res = self.stack.pop();
+        if (pred_res.isTruthy()) {
+            self.executeJump(n);
         }
     }
 

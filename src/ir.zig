@@ -16,8 +16,19 @@ pub const Ir = union(enum) {
         /// The arguments to the function.
         args: []*Ir,
     },
+    if_expr: struct {
+        predicate: *Ir,
+        true_expr: *Ir,
+        false_expr: ?*Ir,
+    },
 
-    pub const Error = std.mem.Allocator.Error || error{ EmptyFunctionCall, TooManyExprs, EmptyExpr };
+    pub const Error = std.mem.Allocator.Error || error{
+        EmptyFunctionCall,
+        TooManyExprs,
+        EmptyExpr,
+        UnexpectedIf,
+        NotImplemented,
+    };
 
     /// Deallocate Ir and all related memory.
     pub fn deinit(self: *Ir, alloc: std.mem.Allocator) void {
@@ -27,6 +38,11 @@ pub const Ir = union(enum) {
                 f.function.deinit(alloc);
                 for (f.args) |*a| a.*.deinit(alloc);
                 alloc.free(f.args);
+            },
+            .if_expr => |*expr| {
+                expr.predicate.deinit(alloc);
+                expr.true_expr.deinit(alloc);
+                if (expr.false_expr) |e| e.deinit(alloc);
             },
         }
         alloc.destroy(self);
@@ -52,8 +68,10 @@ pub const Ir = union(enum) {
     /// Initialize an Ir from a single AST leaf.
     fn initConstant(leaf: *const Leaf, alloc: std.mem.Allocator) Error!*Ir {
         const v = switch (leaf.*) {
+            Leaf.if_expr => return Error.UnexpectedIf,
             Leaf.identifier => Val{ .symbol = leaf.identifier },
             Leaf.string => try Val.initStr(leaf.string, alloc),
+            Leaf.boolean => Val{ .boolean = leaf.boolean },
             Leaf.int => Val{ .int = leaf.int },
             Leaf.float => Val{ .float = leaf.float },
         };
@@ -66,6 +84,10 @@ pub const Ir = union(enum) {
     fn initFunctionCall(asts: []const Ast, alloc: std.mem.Allocator) Error!*Ir {
         if (asts.len == 0) {
             return Error.EmptyFunctionCall;
+        }
+        if (asts.len > 0) {
+            // TODO: Handle if expression.
+            return Error.NotImplemented;
         }
         const function = try init(&asts[0], alloc);
         errdefer function.deinit(alloc);

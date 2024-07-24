@@ -16,6 +16,10 @@ pub const ByteCode = union(enum) {
     /// Evaluate the top n elements in the stack. The deepest element should contain a function with
     /// the rest of the elements containing the arguments.
     eval: usize,
+    /// Jump by usize.
+    jump: usize,
+    /// Jump by usize if the top value of the stack is true.
+    jump_if: usize,
     /// Return from the current function.
     ///   - Take the top value of the stack as the return value.
     ///   - Pop all items on the stack from the function frame's start to the end.
@@ -29,6 +33,8 @@ pub const ByteCode = union(enum) {
             .push_const => |v| try writer.print("push_const({any})", .{v}),
             .deref => try writer.print("deref", .{}),
             .eval => |n| try writer.print("eval({})", .{n}),
+            .jump => |n| try writer.print("jump({})", .{n}),
+            .jump_if => |n| try writer.print("jump_if({})", .{n}),
             .ret => try writer.print("return", .{}),
         }
     }
@@ -89,6 +95,19 @@ pub const ByteCodeFunc = struct {
                 for (f.args) |a| try ByteCodeFunc.initImpl(a, res, constants);
                 try res.append(.{ .eval = f.args.len + 1 });
             },
+            Ir.if_expr => |expr| {
+                try initImpl(expr.predicate, res, constants);
+                var true_expr_res = std.ArrayList(ByteCode).init(res.allocator);
+                defer true_expr_res.deinit();
+                var false_expr_res = std.ArrayList(ByteCode).init(res.allocator);
+                defer false_expr_res.deinit();
+                try initImpl(expr.true_expr, &true_expr_res, constants);
+                if (expr.false_expr) |fe| try initImpl(fe, &false_expr_res, constants);
+                try res.append(.{ .jump_if = false_expr_res.items.len + 1 });
+                try res.appendSlice(false_expr_res.items);
+                try res.append(.{ .jump = true_expr_res.items.len + 1 });
+                try res.appendSlice(true_expr_res.items);
+            },
         }
     }
 };
@@ -100,6 +119,11 @@ fn leafToVal(l: *const Leaf, alloc: std.mem.Allocator) !Val {
         Leaf.int => return .{ .int = l.int },
         Leaf.float => return .{ .float = l.float },
     }
+}
+
+fn deinitArrayList(comptime T: type, arr: *std.ArrayList(T)) void {
+    for (arr.items) |x| x.deinit(arr.allocator);
+    arr.deinit();
 }
 
 test "push single value" {
