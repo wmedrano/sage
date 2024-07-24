@@ -19,31 +19,4 @@ pub fn build(b: *std.Build) void {
     }
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{
-        .root_source_file = b.path("src/ast.zig"),
-        .target = target,
-        .optimize = optimize,
-    })).step);
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{
-        .root_source_file = b.path("src/bytecode.zig"),
-        .target = target,
-        .optimize = optimize,
-    })).step);
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{
-        .root_source_file = b.path("src/tokenizer.zig"),
-        .target = target,
-        .optimize = optimize,
-    })).step);
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{
-        .root_source_file = b.path("src/vm.zig"),
-        .target = target,
-        .optimize = optimize,
-    })).step);
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{
-        .root_source_file = b.path("src/ir.zig"),
-        .target = target,
-        .optimize = optimize,
-    })).step);
 }

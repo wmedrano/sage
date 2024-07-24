@@ -169,7 +169,7 @@ fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
 }
 
 test "basic expression is parsed" {
-    var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\") if true false)");
+    var t = tokenizer.Tokenizer.init("(+ 1 2.1 (string-length \"hello\") (if true 10) (if false 11 12))");
     var ast = try AstCollection.init(&t, std.testing.allocator);
     defer ast.deinit();
 
@@ -184,9 +184,17 @@ test "basic expression is parsed" {
                         .{ .leaf = .{ .identifier = "string-length" } },
                         .{ .leaf = .{ .string = "hello" } },
                     } },
-                    .{ .leaf = .if_expr },
-                    .{ .leaf = .{ .boolean = true } },
-                    .{ .leaf = .{ .boolean = false } },
+                    .{ .tree = &.{
+                        .{ .leaf = .if_expr },
+                        .{ .leaf = .{ .boolean = true } },
+                        .{ .leaf = .{ .int = 10 } },
+                    } },
+                    .{ .tree = &.{
+                        .{ .leaf = .if_expr },
+                        .{ .leaf = .{ .boolean = false } },
+                        .{ .leaf = .{ .int = 11 } },
+                        .{ .leaf = .{ .int = 12 } },
+                    } },
                 },
             },
         },

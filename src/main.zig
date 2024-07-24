@@ -1,8 +1,8 @@
-const std = @import("std");
-const Tokenizer = @import("tokenizer.zig").Tokenizer;
-const ast = @import("ast.zig");
-const bytecode = @import("bytecode.zig");
-const ir = @import("ir.zig");
+pub const std = @import("std");
+pub const Tokenizer = @import("tokenizer.zig").Tokenizer;
+pub const ast = @import("ast.zig");
+pub const bytecode = @import("bytecode.zig");
+pub const ir = @import("ir.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -51,4 +51,8 @@ pub fn main() !void {
         try bw.writer().print("result: {any}", .{expr_result});
     }
     try bw.writer().print("\nruntime-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }
