@@ -11,14 +11,13 @@ pub const Options = struct {
 
 /// Run the benchmarks defined by b. See TestBenchmark for an example benchmark. The benchmark type
 /// (BenchmarkType) must have the following properties:
-/// name - A constant declaration containing the name of the benchmark.
+/// name - A declaration or variable containing the string name of the benchmark.
 /// init - A method that takes the *BenchmarkType object and returns !void. Runs befor each sample.
 /// cleanup - A methed that takes the *BenchmarkType object and returns !void. Runs after each
 ///     sample.
 /// run - A method that takes the *BenchmarkType object and returns !anytype.
-pub fn runBenchmark(b: anytype, options: Options) !void {
-    const BType = @TypeOf(b.*);
-    const name = BType.name;
+pub fn runBenchmark(BType: type, b: *BType, options: Options) !void {
+    const name = @field(b, "name");
     var timer = try std.time.Timer.start();
     std.debug.print("{s:-^80}\n", .{name});
     std.debug.print("warmup-samples: {any}\n", .{options.warmup_samples});
@@ -80,7 +79,7 @@ const Duration = struct {
 };
 
 const TestBenchmark = struct {
-    pub const name: []const u8 = "test-benchmark";
+    name: []const u8 = "test-benchmark",
     alloc: std.mem.Allocator,
     lst: ?std.ArrayListUnmanaged(usize) = null,
 
@@ -108,5 +107,5 @@ const TestBenchmark = struct {
 
 test "test benchmark" {
     var b = TestBenchmark{ .alloc = std.testing.allocator };
-    try runBenchmark(&b, .{ .warmup_samples = 10, .samples = 10, .alloc = std.testing.allocator });
+    try runBenchmark(TestBenchmark, &b, .{ .warmup_samples = 10, .samples = 10, .alloc = std.testing.allocator });
 }
