@@ -35,7 +35,7 @@ pub const Vm = struct {
     /// Contains all the function calls with the last element containing the current function call.
     function_frames: std.ArrayListUnmanaged(FunctionFrame),
     /// Contains all functions that are built in.
-    builtin_functions: []const Val.Function = &builtin_functions,
+    builtin_functions: []const Val.Function = &@import("builtin_functions.zig").builtin_functions,
 
     /// Initialize a new VM with the given allocator.
     pub fn init(alloc: std.mem.Allocator) VmError!Vm {
@@ -170,41 +170,6 @@ pub const Vm = struct {
         try self.stack.append(ret);
     }
 };
-
-const builtin_functions = [_]Val.Function{
-    .{ .name = "+", .function = addFunction },
-    .{ .name = "string-length", .function = stringLengthFunction },
-};
-
-fn stringLengthFunction(args: []Val) !Val {
-    if (args.len != 1) {
-        return error.RuntimeError;
-    }
-    switch (args[0]) {
-        Val.Type.string => |s| return .{ .int = @intCast(s.len) },
-        else => return error.RuntimeError,
-    }
-}
-
-fn addFunction(args: []Val) !Val {
-    var int_sum: i64 = 0;
-    var float_sum: f64 = 0.0;
-    var has_float = false;
-    for (args) |arg| {
-        switch (arg) {
-            Val.Type.float => |f| {
-                has_float = true;
-                float_sum += f;
-            },
-            Val.Type.int => |i| int_sum += i,
-            else => return error.RuntimeError,
-        }
-    }
-    if (has_float) {
-        return error.NotImplemented;
-    }
-    return .{ .int = int_sum };
-}
 
 test "expression can eval" {
     var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", std.testing.allocator);

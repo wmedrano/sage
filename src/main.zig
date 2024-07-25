@@ -34,7 +34,7 @@ pub fn main() !void {
     defer irs.deinit();
     defer for (irs.items) |i| i.deinit(alloc);
     for (1.., asts.asts) |n, a| {
-        try bw.writer().print("expression: #{}\n", .{n});
+        try bw.writer().print("\nexpression: #{}\n", .{n});
         try bw.writer().print("{any}", .{a});
         irs.appendAssumeCapacity(try ir.Ir.init(&a, alloc));
     }
@@ -43,15 +43,15 @@ pub fn main() !void {
     var v = try vm.Vm.init(alloc);
     defer v.deinit();
     for (1.., irs.items) |n, i| {
-        try bw.writer().print("bytecode: #{}\n", .{n});
+        try bw.writer().print("\nbytecode: #{}\n", .{n});
         var bc = try ByteCodeFunc.init(i, alloc);
         defer bc.deinit();
         try bw.writer().print("{any}", .{bc});
         const expr_result = try v.runBytecode(&bc, &.{});
         defer expr_result.deinit(alloc);
-        try bw.writer().print("result: {any}", .{expr_result});
+        try bw.writer().print("result: {any}\n", .{expr_result});
     }
-    try bw.writer().print("\nruntime-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
+    try bw.writer().print("\n\nruntime-duration: {any}us\n\n", .{timer.lap() / std.time.ns_per_us});
 }
 
 test {

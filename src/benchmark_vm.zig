@@ -25,7 +25,7 @@ const VmEvalBenchmark = struct {
 
     pub fn new(alloc: std.mem.Allocator, name: []const u8) !VmEvalBenchmark {
         const vm = try Vm.init(alloc);
-        const expr = "(+ (string-length \"string\") 1 2 3)";
+        const expr = "(- (string-length \"string\") 1 2 3 (if true (/ 1 4)) (if false 0 10))";
         const bytecode = try ByteCodeFunc.initStrExpr(expr, alloc);
         return .{
             .name = name,
@@ -50,13 +50,13 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
+    var b = VmInitBenchmark{ .name = "vm-init", .alloc = alloc };
+    try runBenchmark(VmInitBenchmark, &b, .{ .alloc = alloc });
+
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     var bArena = VmInitBenchmark{ .name = "vm-init-arena", .alloc = arena.allocator() };
     try runBenchmark(VmInitBenchmark, &bArena, .{ .alloc = alloc });
-
-    var b = VmInitBenchmark{ .name = "vm-init", .alloc = alloc };
-    try runBenchmark(VmInitBenchmark, &b, .{ .alloc = alloc });
 
     var evalB = try VmEvalBenchmark.new(alloc, "vm-eval");
     defer evalB.deinit();
