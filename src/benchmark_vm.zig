@@ -1,7 +1,10 @@
 pub const std = @import("std");
-pub const Vm = @import("vm/vm.zig").Vm;
-pub const Val = @import("vm/val.zig").Val;
+
 pub const ByteCodeFunc = @import("vm/bytecode.zig").ByteCodeFunc;
+pub const Heap = @import("vm/heap.zig").Vm;
+pub const Val = @import("vm/val.zig").Val;
+pub const Vm = @import("vm/vm.zig").Vm;
+
 pub const runBenchmark = @import("tools/benchmark.zig").runBenchmark;
 
 const VmInitBenchmark = struct {
@@ -24,9 +27,9 @@ const VmEvalBenchmark = struct {
     vm: Vm,
 
     pub fn init(alloc: std.mem.Allocator, name: []const u8) !VmEvalBenchmark {
-        const vm = try Vm.init(alloc);
+        var vm = try Vm.init(alloc);
         const expr = "(- (string-length \"string\") 1 2 3 (if true (/ 1 4)) (if false 0 10))";
-        const bytecode = try ByteCodeFunc.initStrExpr(expr, alloc);
+        const bytecode = try ByteCodeFunc.initStrExpr(expr, &vm.heap);
         return .{
             .name = name,
             .vm = vm,
@@ -34,14 +37,13 @@ const VmEvalBenchmark = struct {
         };
     }
 
-    pub fn run(self: *VmEvalBenchmark) !void {
-        var ret = try self.vm.runBytecode(&self.bytecode, &[_]Val{});
-        ret.deinit(self.vm.allocator());
+    pub fn run(self: *VmEvalBenchmark) !Val {
+        return self.vm.runBytecode(&self.bytecode, &[_]Val{});
     }
 
     pub fn deinit(self: *VmEvalBenchmark) void {
-        self.vm.deinit();
         self.bytecode.deinit();
+        self.vm.deinit();
     }
 };
 

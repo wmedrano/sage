@@ -1,6 +1,8 @@
 const std = @import("std");
 const tokenizer = @import("tokenizer.zig");
 const ast = @import("ast.zig");
+const ReferenceMarker = @import("heap.zig").ReferenceMarker;
+const Heap = @import("heap.zig").Heap;
 const Val = @import("val.zig").Val;
 const bytecode = @import("bytecode.zig");
 
@@ -36,22 +38,29 @@ pub const Vm = struct {
     function_frames: std.ArrayListUnmanaged(FunctionFrame),
     /// Contains all functions that are built in.
     builtin_functions: []const Val.Function = &@import("builtin_functions.zig").builtin_functions,
+    /// Contains all data on the heap.
+    heap: Heap,
+    /// Intermediate datastructure for keeping track of references.
+    references: ReferenceMarker,
 
     /// Initialize a new VM with the given allocator.
     pub fn init(alloc: std.mem.Allocator) VmError!Vm {
+        const heap = Heap.init(alloc);
         const stack = try std.ArrayList(Val).initCapacity(alloc, 1024);
         const function_frames = try std.ArrayListUnmanaged(FunctionFrame).initCapacity(alloc, 1024);
         return .{
             .stack = stack,
             .function_frames = function_frames,
+            .heap = heap,
+            .references = ReferenceMarker.init(alloc),
         };
     }
 
     /// Deinitialize the VM. This deallocates the VM's allocated memory.
     pub fn deinit(self: *Vm) void {
-        for (self.stack.items) |x| x.deinit(self.allocator());
         self.stack.deinit();
         self.function_frames.deinit(self.allocator());
+        self.heap.deinit();
     }
 
     /// Get the allocator used by the Vm.
@@ -62,6 +71,8 @@ pub const Vm = struct {
     /// Run the bytecode with the given args. On successful execution, a Val is returned and the
     /// stack is reset. On error, the stack will remain as it was in the last error. clearStack may
     /// be called to continue to reuse the Vm.
+    ///
+    /// Note that the returned val may become unavailable after calling runGc.
     pub fn runBytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []Val) VmError!Val {
         if (args.len > 0) {
             return VmError.NotImplemented;
@@ -69,9 +80,7 @@ pub const Vm = struct {
         if (self.stack.items.len != 0) {
             return VmError.CorruptStack;
         }
-        for (args) |arg| {
-            try self.stack.append(try arg.clone(self.allocator()));
-        }
+        try self.stack.appendSlice(args);
         try self.function_frames.append(self.allocator(), .{ .bytecode = bc, .stack_start = 0 });
         while (try self.runNext()) {}
         const ret = self.stack.popOrNull() orelse .void;
@@ -79,9 +88,14 @@ pub const Vm = struct {
         return ret;
     }
 
+    pub fn runGc(self: *Vm) !void {
+        self.references.reset();
+        try self.references.markVals(self.stack.items);
+        self.heap.removeGarbage(&self.references);
+    }
+
     /// Clear the stack of all its contents.
     fn clearStack(self: *Vm) void {
-        for (self.stack.items) |v| v.deinit(self.allocator());
         self.stack.clearRetainingCapacity();
     }
 
@@ -114,33 +128,33 @@ pub const Vm = struct {
 
     /// Execute the push_const instruction.
     fn executePushConst(self: *Vm, bc: *const bytecode.ByteCodeFunc, const_idx: usize) VmError!void {
-        const v = try bc.constants.items[const_idx].clone(self.allocator());
+        const v = bc.constants.items[const_idx];
         try self.stack.append(v);
     }
 
     /// Execute the deref instruction.
     fn executeDeref(self: *Vm) VmError!void {
         const v = switch (self.stack.getLast()) {
-            Val.Type.symbol => |s| self.getSymbol(s) orelse return VmError.UndefinedSymbol,
+            Val.Type.symbol => |s| self.getSymbol(s.data) orelse return VmError.UndefinedSymbol,
             else => return VmError.WrongType,
         };
-        const cloned_val = try v.clone(self.allocator());
-        self.stack.pop().deinit(self.allocator());
-        try self.stack.append(cloned_val);
+        self.stack.items[self.stack.items.len - 1] = v;
     }
 
     /// Execute the eval instruction.
     fn executeEval(self: *Vm, n: usize) VmError!void {
         const function_idx = self.stack.items.len - n;
         const stack = self.stack.items[function_idx + 1 ..];
-        switch (self.stack.items[function_idx]) {
+        const val = self.stack.items[function_idx];
+        switch (val) {
             Val.Type.function => |f| {
                 const res = try f.function(stack);
-                for (self.stack.items[function_idx..]) |v| v.deinit(self.allocator());
                 try self.stack.resize(function_idx);
                 try self.stack.append(res);
             },
-            else => return VmError.WrongType,
+            else => {
+                return VmError.WrongType;
+            },
         }
     }
 
@@ -165,20 +179,18 @@ pub const Vm = struct {
             return;
         }
         const ret = self.stack.pop();
-        for (self.stack.items[function_frame.stack_start..]) |v| v.deinit(self.allocator());
         try self.stack.resize(function_frame.stack_start);
         try self.stack.append(ret);
     }
 };
 
 test "expression can eval" {
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", std.testing.allocator);
-    defer bc.deinit();
-
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", &vm.heap);
+    defer bc.deinit();
+
     const actual = try vm.runBytecode(&bc, &[_]Val{});
-    defer actual.deinit(vm.allocator());
     try std.testing.expectEqualDeep(
         Val{ .int = -1 },
         actual,
@@ -186,23 +198,22 @@ test "expression can eval" {
 }
 
 test "successful expression clears stack" {
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 1 2 3)", std.testing.allocator);
-    defer bc.deinit();
-
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var v = try vm.runBytecode(&bc, &[_]Val{});
-    defer v.deinit(vm.allocator());
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 1 2 3)", &vm.heap);
+    defer bc.deinit();
+
+    _ = try vm.runBytecode(&bc, &[_]Val{});
 
     try std.testing.expectEqualDeep(vm.stack.items, &[_]Val{});
 }
 
 test "wrong args halts VM and maintains VM state" {
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 10 (string-length 4))", std.testing.allocator);
-    defer bc.deinit();
-
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 10 (string-length 4))", &vm.heap);
+    defer bc.deinit();
+
     try std.testing.expectError(error.RuntimeError, vm.runBytecode(&bc, &[_]Val{}));
     try std.testing.expectEqualDeep(vm.stack.items, &[_]Val{
         vm.getSymbol("+") orelse return error.SymbolNotFound,
@@ -216,37 +227,31 @@ test "wrong args halts VM and maintains VM state" {
 }
 
 test "if expression with true pred returns true branch" {
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if true 1 2)", std.testing.allocator);
-    defer bc.deinit();
-
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var v = try vm.runBytecode(&bc, &[_]Val{});
-    defer v.deinit(vm.allocator());
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if true 1 2)", &vm.heap);
+    defer bc.deinit();
 
+    const v = try vm.runBytecode(&bc, &[_]Val{});
     try std.testing.expectEqualDeep(Val{ .int = 1 }, v);
 }
 
 test "if expression with false pred returns false branch" {
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1 2)", std.testing.allocator);
-    defer bc.deinit();
-
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var v = try vm.runBytecode(&bc, &[_]Val{});
-    defer v.deinit(vm.allocator());
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1 2)", &vm.heap);
+    defer bc.deinit();
 
+    const v = try vm.runBytecode(&bc, &[_]Val{});
     try std.testing.expectEqualDeep(Val{ .int = 2 }, v);
 }
 
 test "if expression with false pred and empty false branch returns void" {
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1)", std.testing.allocator);
-    defer bc.deinit();
-
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var v = try vm.runBytecode(&bc, &[_]Val{});
-    defer v.deinit(vm.allocator());
+    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1)", &vm.heap);
+    defer bc.deinit();
 
+    const v = try vm.runBytecode(&bc, &[_]Val{});
     try std.testing.expectEqualDeep(.void, v);
 }

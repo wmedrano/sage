@@ -21,10 +21,28 @@ pub const Val = union(Type) {
         function: *const fn ([]Val) FunctionError!Val,
     };
 
+    pub const String = struct {
+        data: []const u8,
+
+        pub fn init(alloc: std.mem.Allocator, data: []const u8) !*String {
+            var s = try alloc.create(String);
+            s.data = try alloc.dupe(u8, data);
+            return s;
+        }
+
+        pub fn deinit(self: *String, allocator: std.mem.Allocator) void {
+            allocator.free(self.data);
+            allocator.destroy(self);
+        }
+        pub fn format(self: *const String, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+            try writer.print("{s}", .{self.data});
+        }
+    };
+
     /// A none value.
     void,
     /// Contains an immutable symbol. The memory allocation for the slice is not managed by Val.
-    symbol: []const u8,
+    symbol: *String,
     /// A bool.
     boolean: bool,
     /// An integer.
@@ -32,39 +50,9 @@ pub const Val = union(Type) {
     /// A float.
     float: f64,
     /// A mutable string.
-    string: []u8,
+    string: *String,
     /// A function. The memory allocation for this is not managed by Val.
     function: *const Function,
-
-    /// Create a new Val{.string = ...} that holds a copy of string s.
-    pub fn initStr(s: []const u8, alloc: std.mem.Allocator) !Val {
-        const s_copy = try alloc.dupe(u8, s);
-        return .{ .string = s_copy };
-    }
-
-    /// Deallocate any memory associated with Val.
-    pub fn deinit(self: Val, alloc: std.mem.Allocator) void {
-        switch (self) {
-            .void => {},
-            .symbol => {},
-            .boolean => {},
-            .int => {},
-            .float => {},
-            .string => alloc.free(self.string),
-            .function => {},
-        }
-    }
-
-    /// Clone the Val. alloc is used to deep copy some elements.
-    pub fn clone(self: *const Val, alloc: std.mem.Allocator) !Val {
-        switch (self.*) {
-            .string => |s| {
-                const new_s = try alloc.dupe(u8, s);
-                return .{ .string = new_s };
-            },
-            else => return self.*,
-        }
-    }
 
     /// Pretty print the value.
     pub fn format(self: *const Val, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
@@ -74,7 +62,7 @@ pub const Val = union(Type) {
             .boolean => |b| try writer.print("bool({any})", .{b}),
             .int => |n| try writer.print("int({d})", .{n}),
             .float => |n| try writer.print("float({d})", .{n}),
-            .string => |s| try writer.print("string({s})", .{s}),
+            .string => |s| try writer.print("string({any})", .{s.*}),
             .function => |f| try writer.print("function({s})", .{f.name}),
         }
     }
@@ -92,5 +80,12 @@ pub const Val = union(Type) {
 
 test "val size is small" {
     // TODO: Reduce this to 2 words.
-    try std.testing.expectEqual(3 * @sizeOf(usize), @sizeOf(Val));
+    try std.testing.expectEqual(2 * @sizeOf(usize), @sizeOf(Val));
+}
+
+test "val can print" {
+    var res = std.ArrayList(u8).init(std.testing.allocator);
+    defer res.deinit();
+    try res.writer().print("{any}", .{Val{ .int = 0 }});
+    try std.testing.expectEqualStrings("int(0)", res.items);
 }

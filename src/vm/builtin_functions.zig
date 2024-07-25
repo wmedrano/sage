@@ -13,7 +13,7 @@ fn stringLengthFunction(args: []Val) !Val {
         return error.RuntimeError;
     }
     switch (args[0]) {
-        Val.Type.string => |s| return .{ .int = @intCast(s.len) },
+        Val.Type.string => |s| return .{ .int = @intCast(s.data.len) },
         else => return error.RuntimeError,
     }
 }

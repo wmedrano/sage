@@ -1,9 +1,10 @@
 const std = @import("std");
 
-const Ir = @import("ir.zig").Ir;
 const Ast = @import("ast.zig").Ast;
 const AstCollection = @import("ast.zig").AstCollection;
 const AstType = @import("ast.zig").AstType;
+const Heap = @import("heap.zig").Heap;
+const Ir = @import("ir.zig").Ir;
 const Leaf = @import("ast.zig").Leaf;
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Val = @import("val.zig").Val;
@@ -47,8 +48,8 @@ pub const ByteCodeFunc = struct {
     constants: std.ArrayListUnmanaged(Val),
 
     /// Create a new ByteCodeFunc from an Ir.
-    pub fn init(ir: *const Ir, alloc: std.mem.Allocator) !ByteCodeFunc {
-        var instructions = std.ArrayList(ByteCode).init(alloc);
+    pub fn init(ir: *const Ir, heap: *Heap) !ByteCodeFunc {
+        var instructions = std.ArrayList(ByteCode).init(heap.allocator);
         var constants = std.ArrayListUnmanaged(Val){};
         try ByteCodeFunc.initImpl(ir, &instructions, &constants);
         try instructions.append(.ret);
@@ -59,30 +60,34 @@ pub const ByteCodeFunc = struct {
     }
 
     /// Create a new ByteCodeFunc from a string expression.
-    pub fn initStrExpr(expr: []const u8, alloc: std.mem.Allocator) !ByteCodeFunc {
-        const ir = try Ir.initStrExpr(expr, alloc);
-        defer ir.deinit(alloc);
-        return ByteCodeFunc.init(ir, alloc);
+    pub fn initStrExpr(expr: []const u8, heap: *Heap) !ByteCodeFunc {
+        const ir = try Ir.initStrExpr(expr, heap);
+        defer ir.deinit(heap.allocator);
+        return ByteCodeFunc.init(ir, heap);
     }
 
     /// Deallocate all memory associated with the ByteCodeFunc.
     pub fn deinit(self: *ByteCodeFunc) void {
-        for (self.constants.items) |v| v.deinit(self.instructions.allocator);
         self.constants.deinit(self.instructions.allocator);
         self.instructions.deinit();
     }
 
     /// Pretty print the bytecode instructions.
     pub fn format(self: *const ByteCodeFunc, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("Instructions:\n", .{});
         for (0.., self.instructions.items) |idx, instruction| {
-            try writer.print("{d}: {any}\n", .{ idx, instruction });
+            try writer.print("  {d}: {any}\n", .{ idx, instruction });
+        }
+
+        try writer.print("Constants:\n", .{});
+        for (0.., self.constants.items) |idx, constant| {
+            try writer.print("  {d}: {any}\n", .{ idx, constant });
         }
     }
 
     fn initImpl(ir: *const Ir, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
         switch (ir.*) {
-            Ir.constant => |v| {
-                const val = try v.clone(res.allocator);
+            Ir.constant => |val| {
                 const val_idx = constants.items.len;
                 try res.append(.{ .push_const = val_idx });
                 try constants.append(res.allocator, val);
@@ -134,7 +139,9 @@ test "bytecode size is small" {
 }
 
 test "push single value" {
-    var actual = try ByteCodeFunc.initStrExpr("1", std.testing.allocator);
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("1", &heap);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -146,7 +153,9 @@ test "push single value" {
 }
 
 test "simple expression" {
-    var actual = try ByteCodeFunc.initStrExpr("(+ 1 2 variable)", std.testing.allocator);
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("(+ 1 2 variable)", &heap);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -159,15 +168,17 @@ test "simple expression" {
         .ret,
     }, actual.instructions.items);
     try std.testing.expectEqualDeep(&[_]Val{
-        .{ .symbol = "+" },
+        try heap.allocGlobalSymbol("+"),
         .{ .int = 1 },
         .{ .int = 2 },
-        .{ .symbol = "variable" },
+        try heap.allocGlobalSymbol("variable"),
     }, actual.constants.items);
 }
 
 test "if statement" {
-    var actual = try ByteCodeFunc.initStrExpr("(if true 1 2)", std.testing.allocator);
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("(if true 1 2)", &heap);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -185,7 +196,9 @@ test "if statement" {
 }
 
 test "if statement without false branch uses void false branch" {
-    var actual = try ByteCodeFunc.initStrExpr("(if true 1)", std.testing.allocator);
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("(if true 1)", &heap);
     defer actual.deinit();
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
