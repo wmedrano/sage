@@ -22,27 +22,27 @@ pub fn runBenchmark(BType: type, b: *BType, options: Options) !void {
     std.debug.print("{s:-^80}\n", .{name});
     std.debug.print("warmup-samples: {any}\n", .{options.warmup_samples});
     for (0..options.warmup_samples) |_| {
-        if (@hasDecl(BType, "init")) {
-            try b.init();
+        if (@hasDecl(BType, "beforeRun")) {
+            try b.beforeRun();
         }
         _ = try b.run();
-        if (@hasDecl(BType, "cleanup")) {
-            try b.cleanup();
+        if (@hasDecl(BType, "afterRun")) {
+            try b.afterRun();
         }
     }
     std.debug.print("benchmark-samples: {any}\n", .{options.samples});
     var result_nanos = try std.ArrayList(u64).initCapacity(options.alloc, options.samples);
     defer result_nanos.deinit();
     for (0..options.samples) |_| {
-        if (@hasDecl(BType, "init")) {
-            try b.init();
+        if (@hasDecl(BType, "beforeRun")) {
+            try b.beforeRun();
         }
         _ = timer.lap();
         _ = try b.run();
         const nanos = timer.lap();
         result_nanos.appendAssumeCapacity(nanos);
-        if (@hasDecl(BType, "cleanup")) {
-            try b.cleanup();
+        if (@hasDecl(BType, "afterRun")) {
+            try b.afterRun();
         }
     }
     const avg_nanos = Duration.initAvgNanos(result_nanos.items);
@@ -83,21 +83,20 @@ const TestBenchmark = struct {
     alloc: std.mem.Allocator,
     lst: ?std.ArrayListUnmanaged(usize) = null,
 
-    /// Run before each iteration. May be omitted if there is nothing to do.
-    pub fn init(self: *@This()) !void {
+    pub fn run(self: *TestBenchmark) !usize {
+        var sum: usize = 0;
+        for (self.lst.?.items) |i| sum += i;
+        return sum;
+    }
+
+    pub fn beforeRun(self: *TestBenchmark) !void {
         const len = 10000;
         var lst = try std.ArrayListUnmanaged(usize).initCapacity(self.alloc, len);
         for (0..len) |i| lst.appendAssumeCapacity(i);
         self.lst = lst;
     }
 
-    pub fn run(self: *@This()) !usize {
-        var sum: usize = 0;
-        for (self.lst.?.items) |i| sum += i;
-        return sum;
-    }
-
-    pub fn cleanup(self: *@This()) !void {
+    pub fn afterRun(self: *TestBenchmark) !void {
         if (self.lst) |*lst| {
             lst.deinit(self.alloc);
             self.lst = null;

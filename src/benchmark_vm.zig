@@ -12,7 +12,7 @@ const VmInitBenchmark = struct {
     pub fn run(self: *VmInitBenchmark) !void {
         self.vm = try Vm.init(self.alloc);
     }
-    pub fn cleanup(self: *VmInitBenchmark) !void {
+    pub fn afterRun(self: *VmInitBenchmark) !void {
         if (self.vm) |*v| v.deinit();
         self.vm = null;
     }
@@ -23,7 +23,7 @@ const VmEvalBenchmark = struct {
     bytecode: ByteCodeFunc,
     vm: Vm,
 
-    pub fn new(alloc: std.mem.Allocator, name: []const u8) !VmEvalBenchmark {
+    pub fn init(alloc: std.mem.Allocator, name: []const u8) !VmEvalBenchmark {
         const vm = try Vm.init(alloc);
         const expr = "(- (string-length \"string\") 1 2 3 (if true (/ 1 4)) (if false 0 10))";
         const bytecode = try ByteCodeFunc.initStrExpr(expr, alloc);
@@ -48,21 +48,11 @@ const VmEvalBenchmark = struct {
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
 
-    var b = VmInitBenchmark{ .name = "vm-init", .alloc = alloc };
-    try runBenchmark(VmInitBenchmark, &b, .{ .alloc = alloc });
+    var b = VmInitBenchmark{ .name = "vm-init", .alloc = gpa.allocator() };
+    try runBenchmark(VmInitBenchmark, &b, .{ .alloc = gpa.allocator() });
 
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
-    var bArena = VmInitBenchmark{ .name = "vm-init-arena", .alloc = arena.allocator() };
-    try runBenchmark(VmInitBenchmark, &bArena, .{ .alloc = alloc });
-
-    var evalB = try VmEvalBenchmark.new(alloc, "vm-eval");
+    var evalB = try VmEvalBenchmark.init(gpa.allocator(), "vm-eval");
     defer evalB.deinit();
-    try runBenchmark(VmEvalBenchmark, &evalB, .{ .alloc = alloc });
-
-    var evalArenaB = try VmEvalBenchmark.new(arena.allocator(), "vm-eval-arena");
-    defer evalArenaB.deinit();
-    try runBenchmark(VmEvalBenchmark, &evalArenaB, .{ .alloc = arena.allocator() });
+    try runBenchmark(VmEvalBenchmark, &evalB, .{ .alloc = gpa.allocator() });
 }
