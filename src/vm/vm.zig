@@ -157,7 +157,7 @@ pub const Vm = struct {
             .function => |f| {
                 switch (f.function) {
                     .native => |nf| {
-                        const res = try nf(stack);
+                        const res = try nf(self, stack);
                         try self.stack.resize(function_idx);
                         try self.stack.append(res);
                     },

@@ -1,5 +1,6 @@
 const std = @import("std");
 const ByteCodeFunc = @import("bytecode.zig").ByteCodeFunc;
+const Vm = @import("vm.zig").Vm;
 
 pub const Val = union(Type) {
     pub const Type = enum {
@@ -38,7 +39,7 @@ pub const Val = union(Type) {
         is_static: bool,
         /// The implementation of the function.
         function: union(enum) {
-            native: *const fn ([]Val) Error!Val,
+            native: *const fn (*Vm, []Val) Error!Val,
             bytecode: ByteCodeFunc,
         },
 
