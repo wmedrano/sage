@@ -30,14 +30,20 @@ pub const VmError = std.mem.Allocator.Error || error{
     NotImplemented,
 };
 
+pub const DefaultDebugger = struct {
+    pub inline fn nextInstruction(_: *DefaultDebugger, _: *Vm) void {}
+};
+
 pub const Vm = struct {
     /// Contains all stack variables in the Vm. A clean execution should start and end with an empty
     /// stack. If an error occurs, the stack is preserved for further debugging.
-    stack: std.ArrayList(Val),
+    stack: std.ArrayListUnmanaged(Val),
     /// Contains all the function calls with the last element containing the current function call.
     function_frames: std.ArrayListUnmanaged(FunctionFrame),
     /// Contains all functions that are built in.
     builtin_functions: []const Val.Function = &@import("builtin_functions.zig").builtin_functions,
+    /// Contains all defined values.
+    values: std.StringHashMapUnmanaged(Val),
     /// Contains all data on the heap.
     heap: Heap,
     /// Intermediate datastructure for keeping track of references.
@@ -46,11 +52,12 @@ pub const Vm = struct {
     /// Initialize a new VM with the given allocator.
     pub fn init(alloc: std.mem.Allocator) VmError!Vm {
         const heap = Heap.init(alloc);
-        const stack = try std.ArrayList(Val).initCapacity(alloc, 1024);
+        const stack = try std.ArrayListUnmanaged(Val).initCapacity(alloc, 1024);
         const function_frames = try std.ArrayListUnmanaged(FunctionFrame).initCapacity(alloc, 1024);
         return .{
             .stack = stack,
             .function_frames = function_frames,
+            .values = std.StringHashMapUnmanaged(Val){},
             .heap = heap,
             .references = ReferenceMarker.init(alloc),
         };
@@ -58,14 +65,50 @@ pub const Vm = struct {
 
     /// Deinitialize the VM. This deallocates the VM's allocated memory.
     pub fn deinit(self: *Vm) void {
-        self.stack.deinit();
+        self.stack.deinit(self.allocator());
         self.function_frames.deinit(self.allocator());
+        self.values.deinit(self.allocator());
         self.heap.deinit();
     }
 
     /// Get the allocator used by the Vm.
-    pub fn allocator(self: *Vm) std.mem.Allocator {
-        return self.stack.allocator;
+    pub inline fn allocator(self: *Vm) std.mem.Allocator {
+        return self.heap.allocator;
+    }
+
+    pub fn defineVal(self: *Vm, symbol: []const u8, val: Val) !void {
+        const symbol_val = try self.heap.allocGlobalSymbol(symbol);
+        const symbol_str = switch (symbol_val) {
+            .symbol => |s| s.data,
+            else => unreachable,
+        };
+        try self.values.put(self.allocator(), symbol_str, val);
+    }
+
+    pub fn currentFunctionFrame(self: *const Vm) ?*FunctionFrame {
+        const function_frames_count = self.function_frames.items.len;
+        if (function_frames_count == 0) return null;
+        return &self.function_frames.items[function_frames_count - 1];
+    }
+
+    /// Run the bytecode with the given args. On successful execution, a Val is returned and the
+    /// stack is reset. On error, the stack will remain as it was in the last error. clearStack may
+    /// be called to continue to reuse the Vm.
+    ///
+    /// Note that the returned val may become unavailable after calling runGc.
+    pub fn runWithDebugger(self: *Vm, bc: *const ByteCodeFunc, args: []Val, debugger: anytype) VmError!Val {
+        if (args.len > 0) {
+            return VmError.NotImplemented;
+        }
+        if (self.stack.items.len != 0) {
+            return VmError.CorruptStack;
+        }
+        try self.stack.appendSlice(self.allocator(), args);
+        try self.function_frames.append(self.allocator(), .{ .bytecode = bc, .stack_start = 0 });
+        while (try self.runNext(debugger)) {}
+        const ret = self.stack.popOrNull() orelse .void;
+        self.clearStack();
+        return ret;
     }
 
     /// Run the bytecode with the given args. On successful execution, a Val is returned and the
@@ -74,23 +117,17 @@ pub const Vm = struct {
     ///
     /// Note that the returned val may become unavailable after calling runGc.
     pub fn runBytecode(self: *Vm, bc: *const ByteCodeFunc, args: []Val) VmError!Val {
-        if (args.len > 0) {
-            return VmError.NotImplemented;
-        }
-        if (self.stack.items.len != 0) {
-            return VmError.CorruptStack;
-        }
-        try self.stack.appendSlice(args);
-        try self.function_frames.append(self.allocator(), .{ .bytecode = bc, .stack_start = 0 });
-        while (try self.runNext()) {}
-        const ret = self.stack.popOrNull() orelse .void;
-        self.clearStack();
-        return ret;
+        var debugger = DefaultDebugger{};
+        return self.runWithDebugger(bc, args, &debugger);
     }
 
     pub fn runGc(self: *Vm) !void {
         self.references.reset();
         try self.references.markVals(self.stack.items);
+        var values_iter = self.values.valueIterator();
+        while (values_iter.next()) |v| {
+            try self.references.markVal(v.*);
+        }
         self.heap.removeGarbage(&self.references);
     }
 
@@ -101,6 +138,9 @@ pub const Vm = struct {
 
     /// Get the given symbol or null if it is not defined in the global scope.
     fn getSymbol(self: *Vm, symbol: []const u8) ?Val {
+        if (self.values.get(symbol)) |v| {
+            return v;
+        }
         for (self.builtin_functions) |*f| {
             if (std.mem.eql(u8, symbol, f.name)) {
                 return Val{ .function = f };
@@ -110,10 +150,11 @@ pub const Vm = struct {
     }
 
     /// Run the next instruction and return if the Vm should continue executing.
-    fn runNext(self: *Vm) VmError!bool {
+    fn runNext(self: *Vm, debugger: anytype) VmError!bool {
         if (self.function_frames.items.len == 0) return false;
+        debugger.nextInstruction(self);
         const function_frame = &self.function_frames.items[self.function_frames.items.len - 1];
-        const instruction = function_frame.bytecode.instructions.items[function_frame.bytecode_idx];
+        const instruction = function_frame.bytecode.instructions[function_frame.bytecode_idx];
         switch (instruction) {
             .push_const => |i| try self.executePushConst(function_frame.bytecode, i),
             .deref => try self.executeDeref(),
@@ -129,8 +170,8 @@ pub const Vm = struct {
 
     /// Execute the push_const instruction.
     fn executePushConst(self: *Vm, bc: *const ByteCodeFunc, const_idx: usize) VmError!void {
-        const v = bc.constants.items[const_idx];
-        try self.stack.append(v);
+        const v = bc.constants[const_idx];
+        try self.stack.append(self.allocator(), v);
     }
 
     /// Execute the deref instruction.
@@ -145,7 +186,7 @@ pub const Vm = struct {
     fn executeGetArg(self: *Vm, n: usize) VmError!void {
         const stack_start = self.function_frames.items[self.function_frames.items.len - 1].stack_start;
         const idx = stack_start + n;
-        try self.stack.append(self.stack.items[idx]);
+        try self.stack.append(self.allocator(), self.stack.items[idx]);
     }
 
     /// Execute the eval instruction.
@@ -158,8 +199,8 @@ pub const Vm = struct {
                 switch (f.function) {
                     .native => |nf| {
                         const res = try nf(self, stack);
-                        try self.stack.resize(function_idx);
-                        try self.stack.append(res);
+                        try self.stack.resize(self.allocator(), function_idx);
+                        try self.stack.append(self.allocator(), res);
                     },
                     .bytecode => |*b| {
                         try self.function_frames.append(self.allocator(), .{
@@ -192,12 +233,13 @@ pub const Vm = struct {
     fn executeRet(self: *Vm) VmError!void {
         const function_frame = self.function_frames.pop();
         if (self.stack.items.len <= function_frame.stack_start) {
-            try self.stack.append(.{ .int = 0 });
+            try self.stack.append(self.allocator(), .void);
             return;
         }
         const ret = self.stack.pop();
-        try self.stack.resize(function_frame.stack_start);
-        try self.stack.append(ret);
+        try self.stack.resize(self.allocator(), function_frame.stack_start);
+        _ = self.stack.popOrNull();
+        self.stack.appendAssumeCapacity(ret);
     }
 };
 
@@ -212,6 +254,27 @@ test "expression can eval" {
         Val{ .int = -1 },
         actual,
     );
+}
+
+test "can eval fibonacchi" {
+    var vm = try Vm.init(std.testing.allocator);
+    defer vm.deinit();
+
+    var bc1 = try ByteCodeFunc.initStrExpr("(define fib (lambda (n) (if (< n 1) 0 (if (< n 3) 1 (+ (fib (- n 1)) (fib (- n 2)))))))", &vm.heap);
+    defer bc1.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(.void, try vm.runBytecode(&bc1, &[_]Val{}));
+
+    var bc2 = try ByteCodeFunc.initStrExpr("(fib 10)", &vm.heap);
+    defer bc2.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(Val{ .int = 55 }, try vm.runBytecode(&bc2, &[_]Val{}));
+
+    var bc3 = try ByteCodeFunc.initStrExpr("(fib 1)", &vm.heap);
+    defer bc3.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(Val{ .int = 1 }, try vm.runBytecode(&bc3, &[_]Val{}));
+
+    var bc4 = try ByteCodeFunc.initStrExpr("(fib 0)", &vm.heap);
+    defer bc4.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(Val{ .int = 0 }, try vm.runBytecode(&bc4, &[_]Val{}));
 }
 
 test "successful expression clears stack" {

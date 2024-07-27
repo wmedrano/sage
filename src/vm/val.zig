@@ -30,7 +30,7 @@ pub const Val = union(Type) {
 
     /// Holds a function that may be called with a slice of Val to return a new Val.
     pub const Function = struct {
-        pub const Error = error{ RuntimeError, NotImplemented };
+        pub const Error = error{ OutOfMemory, RuntimeError, NotImplemented };
 
         /// The name of the function.
         name: []const u8,
@@ -45,7 +45,6 @@ pub const Val = union(Type) {
 
         pub fn deinit(self: *Function, allocator: std.mem.Allocator) void {
             if (self.is_static) return;
-            allocator.free(self.name);
             switch (self.function) {
                 .native => {},
                 .bytecode => |*bc| {

@@ -1,15 +1,19 @@
 const Val = @import("val.zig").Val;
 const Vm = @import("vm.zig").Vm;
 
+const Error = Val.Function.Error;
+
 pub const builtin_functions = [_]Val.Function{
+    .{ .name = "%define", .is_static = true, .function = .{ .native = defineFunction } },
     .{ .name = "+", .is_static = true, .function = .{ .native = addFunction } },
     .{ .name = "-", .is_static = true, .function = .{ .native = subFunction } },
     .{ .name = "*", .is_static = true, .function = .{ .native = multFunction } },
     .{ .name = "/", .is_static = true, .function = .{ .native = divFunction } },
     .{ .name = "string-length", .is_static = true, .function = .{ .native = stringLengthFunction } },
+    .{ .name = "<", .is_static = true, .function = .{ .native = lessFunction } },
 };
 
-fn stringLengthFunction(_: *Vm, args: []Val) !Val {
+fn stringLengthFunction(_: *Vm, args: []Val) Error!Val {
     if (args.len != 1) {
         return error.RuntimeError;
     }
@@ -19,7 +23,7 @@ fn stringLengthFunction(_: *Vm, args: []Val) !Val {
     }
 }
 
-fn negate(arg: Val) !Val {
+fn negate(arg: Val) Error!Val {
     switch (arg) {
         Val.Type.float => |f| return .{ .float = -f },
         Val.Type.int => |i| return .{ .int = -i },
@@ -27,7 +31,22 @@ fn negate(arg: Val) !Val {
     }
 }
 
-fn addFunction(_: *Vm, args: []Val) !Val {
+fn defineFunction(vm: *Vm, args: []Val) Val.Function.Error!Val {
+    switch (args.len) {
+        2 => {
+            switch (args[0]) {
+                .symbol => |s| {
+                    try vm.defineVal(s.data, args[1]);
+                },
+                else => return error.RuntimeError,
+            }
+        },
+        else => return error.RuntimeError,
+    }
+    return .void;
+}
+
+fn addFunction(_: *Vm, args: []Val) Error!Val {
     var int_sum: i64 = 0;
     var float_sum: f64 = 0.0;
     var has_float = false;
@@ -48,7 +67,7 @@ fn addFunction(_: *Vm, args: []Val) !Val {
     return .{ .int = int_sum };
 }
 
-fn subFunction(vm: *Vm, args: []Val) !Val {
+fn subFunction(vm: *Vm, args: []Val) Error!Val {
     switch (args.len) {
         0 => return error.RuntimeError,
         1 => return negate(args[0]),
@@ -64,7 +83,7 @@ fn subFunction(vm: *Vm, args: []Val) !Val {
     }
 }
 
-fn reciprocal(arg: Val) !Val {
+fn reciprocal(arg: Val) Error!Val {
     switch (arg) {
         Val.Type.float => |f| return .{ .float = 1 / f },
         Val.Type.int => |i| {
@@ -75,7 +94,7 @@ fn reciprocal(arg: Val) !Val {
     }
 }
 
-fn multFunction(_: *Vm, args: []Val) !Val {
+fn multFunction(_: *Vm, args: []Val) Error!Val {
     var int_prod: i64 = 1;
     var float_prod: f64 = 1.0;
     var has_float = false;
@@ -96,7 +115,7 @@ fn multFunction(_: *Vm, args: []Val) !Val {
     return .{ .int = int_prod };
 }
 
-fn divFunction(vm: *Vm, args: []Val) !Val {
+fn divFunction(vm: *Vm, args: []Val) Error!Val {
     switch (args.len) {
         0 => return error.RuntimeError,
         1 => return reciprocal(args[0]),
@@ -110,4 +129,24 @@ fn divFunction(vm: *Vm, args: []Val) !Val {
             return multFunction(vm, &factors);
         },
     }
+}
+
+fn lessFunction(_: *Vm, args: []Val) Error!Val {
+    if (args.len < 2) {
+        return Error.RuntimeError;
+    }
+    var smaller = switch (args[0]) {
+        .int => |i| i,
+        else => return Error.RuntimeError,
+    };
+    for (args[1..]) |larger| {
+        switch (larger) {
+            .int => |i| {
+                if (smaller >= i) return .{ .boolean = false };
+                smaller = i;
+            },
+            else => return Error.RuntimeError,
+        }
+    }
+    return .{ .boolean = true };
 }

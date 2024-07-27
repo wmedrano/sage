@@ -39,8 +39,7 @@ pub const Ir = union(enum) {
         TooManyArguments,
         NotEnoughArguments,
         EmptyExpr,
-        UnexpectedIf,
-        UnexpectedLambda,
+        UnexpectedKeyword,
         NotImplemented,
         ExpectedExpr,
         ExpectedIdentifier,
@@ -87,6 +86,18 @@ pub const Ir = union(enum) {
         }
         alloc.destroy(self);
     }
+
+    pub fn format(self: *const Ir, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        switch (self.*) {
+            .constant => |c| try writer.print("constant({any}) ", .{c}),
+            .deref => |d| try writer.print("deref({s}) ", .{d}),
+            .get_arg => |a| try writer.print("get_arg({d}) ", .{a}),
+            .function_call => |f| try writer.print("funcall({any}, {any}) ", .{ f.function, f.args }),
+            .if_expr => |e| try writer.print("if({any}, {any}, {any}) ", .{ e.predicate, e.true_expr, e.false_expr }),
+            .lambda => |l| try writer.print("lambda({any}) ", .{l.exprs}),
+        }
+        try writer.print("\n", .{});
+    }
 };
 
 const IrBuilder = struct {
@@ -122,6 +133,13 @@ const IrBuilder = struct {
                                     }
                                     return self.buildLambdaExpr(&rest[0], rest[1..], heap);
                                 },
+                                .define => {
+                                    switch (rest.len) {
+                                        0 | 1 => return Error.NotEnoughArguments,
+                                        2 => return self.buildDefine(&rest[0], &rest[1], heap),
+                                        else => return Error.TooManyArguments,
+                                    }
+                                },
                             },
                             else => return self.buildFunctionCall(first, rest, heap),
                         }
@@ -138,27 +156,56 @@ const IrBuilder = struct {
 
     /// Build an Ir from a single AST leaf.
     fn buildLeaf(self: *IrBuilder, leaf: *const Leaf, heap: *Heap) Error!*Ir {
-        const ret = try heap.allocator.create(Ir);
-        errdefer ret.deinit(heap.allocator);
         const v = switch (leaf.*) {
-            Leaf.keyword => |k| switch (k) {
-                .if_expr => return Error.UnexpectedIf,
-                .lambda => return Error.UnexpectedLambda,
-            },
-            Leaf.identifier => |ident| {
-                if (self.arg_to_idx.get(ident)) |idx| {
-                    ret.* = .{ .get_arg = idx };
-                } else {
-                    ret.* = .{ .deref = ident };
-                }
-                return ret;
-            },
+            Leaf.keyword => return Error.UnexpectedKeyword,
+            Leaf.identifier => |ident| return self.buildDeref(ident, heap),
             Leaf.string => try heap.allocGlobalString(leaf.string),
             Leaf.boolean => Val{ .boolean = leaf.boolean },
             Leaf.int => Val{ .int = leaf.int },
             Leaf.float => Val{ .float = leaf.float },
         };
+        const ret = try heap.allocator.create(Ir);
+        errdefer ret.deinit(heap.allocator);
         ret.* = .{ .constant = v };
+        return ret;
+    }
+
+    /// Build a deref on a symbol. This attempts to dereference the symbol from the function
+    /// arguments and falls back to the global scope if the variable is not defined..
+    fn buildDeref(self: *IrBuilder, symbol: []const u8, heap: *Heap) Error!*Ir {
+        const ret = try heap.allocator.create(Ir);
+        errdefer ret.deinit(heap.allocator);
+        if (self.arg_to_idx.get(symbol)) |idx| {
+            ret.* = .{ .get_arg = idx };
+        } else {
+            ret.* = .{ .deref = symbol };
+        }
+        return ret;
+    }
+
+    fn buildDefine(self: *IrBuilder, sym: *const Ast, def: *const Ast, heap: *Heap) Error!*Ir {
+        const sym_val = switch (sym.*) {
+            .tree => return Error.ExpectedIdentifier,
+            .leaf => |l| switch (l) {
+                .identifier => |ident| try heap.allocGlobalSymbol(ident),
+                else => return Error.ExpectedIdentifier,
+            },
+        };
+        const args = try heap.allocator.alloc(*Ir, 2);
+        errdefer heap.allocator.free(args);
+        args[0] = try heap.allocator.create(Ir);
+        errdefer args[0].deinit(heap.allocator);
+        args[0].* = .{ .constant = sym_val };
+        args[1] = try self.build(def, heap);
+        errdefer args[1].deinit(heap.allocator);
+        const ret = try heap.allocator.create(Ir);
+        errdefer ret.deinit(heap.allocator);
+        ret.* = .{
+            .function_call = .{
+                .function = try self.buildDeref("%define", heap),
+                .args = args,
+            },
+        };
         return ret;
     }
 
@@ -257,6 +304,20 @@ test "parse simple expression" {
         .args = @constCast(&[_]*Ir{
             @constCast(&Ir{ .constant = .{ .int = 1 } }),
             @constCast(&Ir{ .constant = .{ .int = 2 } }),
+        }),
+    } }, actual);
+}
+
+test "parse define statement" {
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    var actual = try Ir.initStrExpr("(define x 12)", &heap);
+    defer actual.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(&Ir{ .function_call = .{
+        .function = @constCast(&Ir{ .deref = "%define" }),
+        .args = @constCast(&[_]*Ir{
+            @constCast(&Ir{ .constant = try heap.allocGlobalSymbol("x") }),
+            @constCast(&Ir{ .constant = .{ .int = 12 } }),
         }),
     } }, actual);
 }

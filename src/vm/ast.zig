@@ -17,6 +17,8 @@ pub const Leaf = union(enum) {
         if_expr,
         // "lambda"
         lambda,
+        // "define"
+        define,
     },
     /// A reference to a variable or constant. The name is stored as a string.
     identifier: []const u8,
@@ -35,6 +37,7 @@ pub const Leaf = union(enum) {
             .keyword => |k| switch (k) {
                 .if_expr => try writer.print("if", .{}),
                 .lambda => try writer.print("lambda", .{}),
+                .define => try writer.print("define", .{}),
             },
             .identifier => |s| try writer.print("identifier({s})", .{s}),
             .string => |s| try writer.print("string({s})", .{s}),
@@ -58,6 +61,9 @@ pub const Leaf = union(enum) {
         }
         if (std.mem.eql(u8, "lambda", ident)) {
             return .{ .keyword = .lambda };
+        }
+        if (std.mem.eql(u8, "define", ident)) {
+            return .{ .keyword = .define };
         }
         if (std.fmt.parseInt(i64, ident, 10)) |i| {
             return .{ .int = i };
@@ -180,7 +186,7 @@ fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
 }
 
 test "basic expression is parsed" {
-    var t = Tokenizer.init("(+ 1 2.1 (string-length \"hello\") (if true 10) (if false 11 12))");
+    var t = Tokenizer.init("(define + 1 2.1 (string-length \"hello\") (if true 10) (if false 11 12))");
     var ast = try AstCollection.init(&t, std.testing.allocator);
     defer ast.deinit();
 
@@ -188,6 +194,7 @@ test "basic expression is parsed" {
         .asts = &[_]Ast{
             .{
                 .tree = &.{
+                    .{ .leaf = .{ .keyword = .define } },
                     .{ .leaf = .{ .identifier = "+" } },
                     .{ .leaf = .{ .int = 1 } },
                     .{ .leaf = .{ .float = 2.1 } },

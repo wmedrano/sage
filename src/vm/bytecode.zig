@@ -46,19 +46,21 @@ pub const ByteCode = union(enum) {
 
 pub const ByteCodeFunc = struct {
     /// Contains the sequence of instructions to run.
-    instructions: std.ArrayListUnmanaged(ByteCode),
+    instructions: []ByteCode,
     /// Contains all constants. These are referenced by index.
-    constants: std.ArrayListUnmanaged(Val),
+    constants: []Val,
 
     /// Create a new ByteCodeFunc from an Ir.
     pub fn init(ir: *const Ir, heap: *Heap) !ByteCodeFunc {
         var instructions = std.ArrayListUnmanaged(ByteCode){};
+        errdefer instructions.deinit(heap.allocator);
         var constants = std.ArrayListUnmanaged(Val){};
+        errdefer constants.deinit(heap.allocator);
         try ByteCodeFunc.initImpl(ir, &instructions, &constants, heap);
         try instructions.append(heap.allocator, .ret);
         return .{
-            .instructions = instructions,
-            .constants = constants,
+            .instructions = try instructions.toOwnedSlice(heap.allocator),
+            .constants = try constants.toOwnedSlice(heap.allocator),
         };
     }
 
@@ -71,19 +73,19 @@ pub const ByteCodeFunc = struct {
 
     /// Deallocate all memory associated with the ByteCodeFunc.
     pub fn deinit(self: *ByteCodeFunc, allocator: std.mem.Allocator) void {
-        self.constants.deinit(allocator);
-        self.instructions.deinit(allocator);
+        allocator.free(self.constants);
+        allocator.free(self.instructions);
     }
 
     /// Pretty print the bytecode instructions.
     pub fn format(self: *const ByteCodeFunc, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("Instructions:\n", .{});
-        for (0.., self.instructions.items) |idx, instruction| {
+        for (0.., self.instructions) |idx, instruction| {
             try writer.print("  {d}: {any}\n", .{ idx, instruction });
         }
 
         try writer.print("Constants:\n", .{});
-        for (0.., self.constants.items) |idx, constant| {
+        for (0.., self.constants) |idx, constant| {
             try writer.print("  {d}: {any}\n", .{ idx, constant });
         }
     }
@@ -99,6 +101,7 @@ pub const ByteCodeFunc = struct {
                 const val_idx = constants.items.len;
                 const symbol_val = try heap.allocGlobalSymbol(d);
                 try constants.append(heap.allocator, symbol_val);
+                // TODO: Create a single instruction that derefs.
                 try res.appendSlice(heap.allocator, &[_]ByteCode{
                     .{ .push_const = val_idx },
                     .deref,
@@ -135,12 +138,12 @@ pub const ByteCodeFunc = struct {
                 try instructions.append(heap.allocator, .ret);
                 const lambda_fn = try heap.allocFunction();
                 lambda_fn.* = .{
-                    .name = "",
+                    .name = "_",
                     .is_static = false,
                     .function = .{
                         .bytecode = .{
-                            .instructions = instructions,
-                            .constants = l_constants,
+                            .instructions = try instructions.toOwnedSlice(heap.allocator),
+                            .constants = try l_constants.toOwnedSlice(heap.allocator),
                         },
                     },
                 };
@@ -181,10 +184,10 @@ test "push single value" {
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
         .ret,
-    }, actual.instructions.items);
+    }, actual.instructions);
     try std.testing.expectEqualDeep(&[_]Val{
         .{ .int = 1 },
-    }, actual.constants.items);
+    }, actual.constants);
 }
 
 test "simple expression" {
@@ -201,13 +204,13 @@ test "simple expression" {
         .deref,
         .{ .eval = 4 },
         .ret,
-    }, actual.instructions.items);
+    }, actual.instructions);
     try std.testing.expectEqualDeep(&[_]Val{
         try heap.allocGlobalSymbol("+"),
         .{ .int = 1 },
         .{ .int = 2 },
         try heap.allocGlobalSymbol("variable"),
-    }, actual.constants.items);
+    }, actual.constants);
 }
 
 test "if statement" {
@@ -222,12 +225,12 @@ test "if statement" {
         .{ .jump = 1 },
         .{ .push_const = 1 },
         .ret,
-    }, actual.instructions.items);
+    }, actual.instructions);
     try std.testing.expectEqualDeep(&[_]Val{
         .{ .boolean = true },
         .{ .int = 1 },
         .{ .int = 2 },
-    }, actual.constants.items);
+    }, actual.constants);
 }
 
 test "if statement without false branch uses void false branch" {
@@ -242,12 +245,12 @@ test "if statement without false branch uses void false branch" {
         .{ .jump = 1 },
         .{ .push_const = 1 },
         .ret,
-    }, actual.instructions.items);
+    }, actual.instructions);
     try std.testing.expectEqualDeep(&[_]Val{
         .{ .boolean = true },
         .{ .int = 1 },
         .void,
-    }, actual.constants.items);
+    }, actual.constants);
 }
 
 test "lambda is pushed" {
@@ -258,6 +261,6 @@ test "lambda is pushed" {
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
         .ret,
-    }, actual.instructions.items);
-    try std.testing.expectEqual(1, actual.constants.items.len);
+    }, actual.instructions);
+    try std.testing.expectEqual(1, actual.constants.len);
 }

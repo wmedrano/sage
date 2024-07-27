@@ -27,12 +27,18 @@ const VmEvalBenchmark = struct {
 
     pub fn init(alloc: std.mem.Allocator, name: []const u8) !VmEvalBenchmark {
         var vm = try Vm.init(alloc);
-        const expr = "(- (string-length \"string\") 1 2 3 (if true (/ 1 4)) (if false 0 10))";
-        const bytecode = try ByteCodeFunc.initStrExpr(expr, &vm.heap);
+        const fib_src = "(define fib (lambda (n) (if (< n 1) 0 (if (< n 3) 1 (+ (fib (- n 1)) (fib (- n 2)))))))";
+        var fib = try ByteCodeFunc.initStrExpr(fib_src, &vm.heap);
+        defer fib.deinit(alloc);
+        _ = try vm.runBytecode(&fib, &[_]Val{});
+        try vm.runGc();
+
+        const bench_src = "(fib 13)";
+        const bench = try ByteCodeFunc.initStrExpr(bench_src, &vm.heap);
         return .{
             .name = name,
             .vm = vm,
-            .bytecode = bytecode,
+            .bytecode = bench,
         };
     }
 

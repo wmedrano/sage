@@ -8,7 +8,7 @@ pub const Benchmark = struct {
         /// The number of iterations to run as a warmup.
         warmup_samples: usize = 1000,
         /// The number of samples to collect.
-        samples: usize = 1000000,
+        samples: usize = 100000,
         /// If the results should be printed out.
         print_results: bool = true,
         /// The allocator to user for intermediate results.
