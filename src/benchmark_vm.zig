@@ -41,7 +41,7 @@ const VmEvalBenchmark = struct {
     }
 
     pub inline fn deinit(self: *VmEvalBenchmark) void {
-        self.bytecode.deinit();
+        self.bytecode.deinit(self.vm.allocator());
         self.vm.deinit();
     }
 };

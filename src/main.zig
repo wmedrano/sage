@@ -46,7 +46,7 @@ pub fn main() !void {
     for (1.., irs.items) |n, i| {
         try bw.writer().print("\nbytecode: #{}\n", .{n});
         var bc = try ByteCodeFunc.init(i, &v.heap);
-        defer bc.deinit();
+        defer bc.deinit(v.heap.allocator);
         try bw.writer().print("{any}", .{bc});
         const expr_result = try v.runBytecode(&bc, &.{});
         try bw.writer().print("result: {any}\n", .{expr_result});

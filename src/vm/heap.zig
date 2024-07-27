@@ -5,12 +5,14 @@ pub const Heap = struct {
     allocator: std.mem.Allocator,
     strings: std.ArrayListUnmanaged(*Val.String),
     global_strings: std.StringHashMapUnmanaged(*Val.String),
+    global_functions: std.ArrayListUnmanaged(*Val.Function),
 
     pub fn init(allocator: std.mem.Allocator) Heap {
         return .{
             .allocator = allocator,
             .strings = std.ArrayListUnmanaged(*Val.String){},
             .global_strings = std.StringHashMapUnmanaged(*Val.String){},
+            .global_functions = std.ArrayListUnmanaged(*Val.Function){},
         };
     }
 
@@ -21,6 +23,13 @@ pub const Heap = struct {
         var global_strings_iter = self.global_strings.valueIterator();
         while (global_strings_iter.next()) |s| s.*.deinit(self.allocator);
         self.global_strings.deinit(self.allocator);
+
+        for (self.global_functions.items) |f| {
+            std.debug.assert(!f.is_static);
+            f.deinit(self.allocator);
+            self.allocator.destroy(f);
+        }
+        self.global_functions.deinit(self.allocator);
     }
 
     pub fn stringCount(self: *const Heap) usize {
@@ -62,6 +71,12 @@ pub const Heap = struct {
         const s_copy = try Val.String.init(self.allocator, s);
         try self.global_strings.put(self.allocator, s_copy.data, s_copy);
         return Val{ .symbol = s_copy };
+    }
+
+    pub fn allocFunction(self: *Heap) !*Val.Function {
+        const res = try self.allocator.create(Val.Function);
+        try self.global_functions.append(self.allocator, res);
+        return res;
     }
 
     /// Pretty print the value.

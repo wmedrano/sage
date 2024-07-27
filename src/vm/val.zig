@@ -1,4 +1,5 @@
 const std = @import("std");
+const ByteCodeFunc = @import("bytecode.zig").ByteCodeFunc;
 
 pub const Val = union(Type) {
     pub const Type = enum {
@@ -23,7 +24,7 @@ pub const Val = union(Type) {
     float: f64,
     /// A mutable string.
     string: *String,
-    /// A function. The memory allocation for this is not managed by Val.
+    /// A function.
     function: *const Function,
 
     /// Holds a function that may be called with a slice of Val to return a new Val.
@@ -32,8 +33,25 @@ pub const Val = union(Type) {
 
         /// The name of the function.
         name: []const u8,
+        /// True if the function is statically allocated. Statically allocated functions do not need
+        /// to be freed as they live for the entire program.
+        is_static: bool,
         /// The implementation of the function.
-        function: *const fn ([]Val) Error!Val,
+        function: union(enum) {
+            native: *const fn ([]Val) Error!Val,
+            bytecode: ByteCodeFunc,
+        },
+
+        pub fn deinit(self: *Function, allocator: std.mem.Allocator) void {
+            if (self.is_static) return;
+            allocator.free(self.name);
+            switch (self.function) {
+                .native => {},
+                .bytecode => |*bc| {
+                    bc.deinit(allocator);
+                },
+            }
+        }
     };
 
     pub const String = struct {

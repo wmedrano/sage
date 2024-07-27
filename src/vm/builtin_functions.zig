@@ -1,11 +1,11 @@
 const Val = @import("val.zig").Val;
 
 pub const builtin_functions = [_]Val.Function{
-    .{ .name = "+", .function = addFunction },
-    .{ .name = "-", .function = subFunction },
-    .{ .name = "*", .function = multFunction },
-    .{ .name = "/", .function = divFunction },
-    .{ .name = "string-length", .function = stringLengthFunction },
+    .{ .name = "+", .is_static = true, .function = .{ .native = addFunction } },
+    .{ .name = "-", .is_static = true, .function = .{ .native = subFunction } },
+    .{ .name = "*", .is_static = true, .function = .{ .native = multFunction } },
+    .{ .name = "/", .is_static = true, .function = .{ .native = divFunction } },
+    .{ .name = "string-length", .is_static = true, .function = .{ .native = stringLengthFunction } },
 };
 
 fn stringLengthFunction(args: []Val) !Val {

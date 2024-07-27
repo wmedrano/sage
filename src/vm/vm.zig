@@ -4,12 +4,12 @@ const ast = @import("ast.zig");
 const ReferenceMarker = @import("heap.zig").ReferenceMarker;
 const Heap = @import("heap.zig").Heap;
 const Val = @import("val.zig").Val;
-const bytecode = @import("bytecode.zig");
+const ByteCodeFunc = @import("bytecode.zig").ByteCodeFunc;
 
 /// Contains details for the current function call.
 const FunctionFrame = struct {
     /// The bytecode that is being executed.
-    bytecode: *const bytecode.ByteCodeFunc,
+    bytecode: *const ByteCodeFunc,
     /// The index to the start of the current function's stack.
     stack_start: usize,
     /// The index to the next instruction to execute within bytecode.
@@ -73,7 +73,7 @@ pub const Vm = struct {
     /// be called to continue to reuse the Vm.
     ///
     /// Note that the returned val may become unavailable after calling runGc.
-    pub fn runBytecode(self: *Vm, bc: *const bytecode.ByteCodeFunc, args: []Val) VmError!Val {
+    pub fn runBytecode(self: *Vm, bc: *const ByteCodeFunc, args: []Val) VmError!Val {
         if (args.len > 0) {
             return VmError.NotImplemented;
         }
@@ -117,6 +117,7 @@ pub const Vm = struct {
         switch (instruction) {
             .push_const => |i| try self.executePushConst(function_frame.bytecode, i),
             .deref => try self.executeDeref(),
+            .get_arg => |n| try self.executeGetArg(n),
             .eval => |n| try self.executeEval(n),
             .jump => |n| self.executeJump(n),
             .jump_if => |n| self.executeJumpIf(n),
@@ -127,7 +128,7 @@ pub const Vm = struct {
     }
 
     /// Execute the push_const instruction.
-    fn executePushConst(self: *Vm, bc: *const bytecode.ByteCodeFunc, const_idx: usize) VmError!void {
+    fn executePushConst(self: *Vm, bc: *const ByteCodeFunc, const_idx: usize) VmError!void {
         const v = bc.constants.items[const_idx];
         try self.stack.append(v);
     }
@@ -141,16 +142,32 @@ pub const Vm = struct {
         self.stack.items[self.stack.items.len - 1] = v;
     }
 
+    fn executeGetArg(self: *Vm, n: usize) VmError!void {
+        const stack_start = self.function_frames.items[self.function_frames.items.len - 1].stack_start;
+        const idx = stack_start + n;
+        try self.stack.append(self.stack.items[idx]);
+    }
+
     /// Execute the eval instruction.
     fn executeEval(self: *Vm, n: usize) VmError!void {
         const function_idx = self.stack.items.len - n;
         const stack = self.stack.items[function_idx + 1 ..];
-        const val = self.stack.items[function_idx];
-        switch (val) {
-            Val.Type.function => |f| {
-                const res = try f.function(stack);
-                try self.stack.resize(function_idx);
-                try self.stack.append(res);
+        const call_val = self.stack.items[function_idx];
+        switch (call_val) {
+            .function => |f| {
+                switch (f.function) {
+                    .native => |nf| {
+                        const res = try nf(stack);
+                        try self.stack.resize(function_idx);
+                        try self.stack.append(res);
+                    },
+                    .bytecode => |*b| {
+                        try self.function_frames.append(self.allocator(), .{
+                            .bytecode = b,
+                            .stack_start = function_idx + 1,
+                        });
+                    },
+                }
             },
             else => {
                 return VmError.WrongType;
@@ -187,8 +204,8 @@ pub const Vm = struct {
 test "expression can eval" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", &vm.heap);
-    defer bc.deinit();
+    var bc = try ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", &vm.heap);
+    defer bc.deinit(std.testing.allocator);
 
     const actual = try vm.runBytecode(&bc, &[_]Val{});
     try std.testing.expectEqualDeep(
@@ -200,8 +217,8 @@ test "expression can eval" {
 test "successful expression clears stack" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 1 2 3)", &vm.heap);
-    defer bc.deinit();
+    var bc = try ByteCodeFunc.initStrExpr("(+ 1 2 3)", &vm.heap);
+    defer bc.deinit(std.testing.allocator);
 
     _ = try vm.runBytecode(&bc, &[_]Val{});
 
@@ -211,8 +228,8 @@ test "successful expression clears stack" {
 test "wrong args halts VM and maintains VM state" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(+ 10 (string-length 4))", &vm.heap);
-    defer bc.deinit();
+    var bc = try ByteCodeFunc.initStrExpr("(+ 10 (string-length 4))", &vm.heap);
+    defer bc.deinit(std.testing.allocator);
 
     try std.testing.expectError(error.RuntimeError, vm.runBytecode(&bc, &[_]Val{}));
     try std.testing.expectEqualDeep(vm.stack.items, &[_]Val{
@@ -229,8 +246,8 @@ test "wrong args halts VM and maintains VM state" {
 test "if expression with true pred returns true branch" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if true 1 2)", &vm.heap);
-    defer bc.deinit();
+    var bc = try ByteCodeFunc.initStrExpr("(if true 1 2)", &vm.heap);
+    defer bc.deinit(std.testing.allocator);
 
     const v = try vm.runBytecode(&bc, &[_]Val{});
     try std.testing.expectEqualDeep(Val{ .int = 1 }, v);
@@ -239,8 +256,8 @@ test "if expression with true pred returns true branch" {
 test "if expression with false pred returns false branch" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1 2)", &vm.heap);
-    defer bc.deinit();
+    var bc = try ByteCodeFunc.initStrExpr("(if false 1 2)", &vm.heap);
+    defer bc.deinit(std.testing.allocator);
 
     const v = try vm.runBytecode(&bc, &[_]Val{});
     try std.testing.expectEqualDeep(Val{ .int = 2 }, v);
@@ -249,9 +266,22 @@ test "if expression with false pred returns false branch" {
 test "if expression with false pred and empty false branch returns void" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try bytecode.ByteCodeFunc.initStrExpr("(if false 1)", &vm.heap);
-    defer bc.deinit();
+    var bc = try ByteCodeFunc.initStrExpr("(if false 1)", &vm.heap);
+    defer bc.deinit(std.testing.allocator);
 
     const v = try vm.runBytecode(&bc, &[_]Val{});
     try std.testing.expectEqualDeep(.void, v);
+}
+
+test "lambda can eval" {
+    var vm = try Vm.init(std.testing.allocator);
+    defer vm.deinit();
+    var bc = try ByteCodeFunc.initStrExpr("((lambda (a b c) (+ 1 a b c)) 2 3 4)", &vm.heap);
+    defer bc.deinit(std.testing.allocator);
+
+    const actual = try vm.runBytecode(&bc, &[_]Val{});
+    try std.testing.expectEqualDeep(
+        Val{ .int = 10 },
+        actual,
+    );
 }
