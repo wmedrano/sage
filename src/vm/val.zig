@@ -1,7 +1,5 @@
 const std = @import("std");
 
-pub const FunctionError = error{ RuntimeError, NotImplemented };
-
 pub const Val = union(Type) {
     pub const Type = enum {
         void,
@@ -13,12 +11,29 @@ pub const Val = union(Type) {
         function,
     };
 
+    /// A none value.
+    void,
+    /// Contains an immutable symbol. The memory allocation for the slice is not managed by Val.
+    symbol: *String,
+    /// A bool.
+    boolean: bool,
+    /// An integer.
+    int: i64,
+    /// A float.
+    float: f64,
+    /// A mutable string.
+    string: *String,
+    /// A function. The memory allocation for this is not managed by Val.
+    function: *const Function,
+
     /// Holds a function that may be called with a slice of Val to return a new Val.
     pub const Function = struct {
+        pub const Error = error{ RuntimeError, NotImplemented };
+
         /// The name of the function.
         name: []const u8,
         /// The implementation of the function.
-        function: *const fn ([]Val) FunctionError!Val,
+        function: *const fn ([]Val) Error!Val,
     };
 
     pub const String = struct {
@@ -38,21 +53,6 @@ pub const Val = union(Type) {
             try writer.print("{s}", .{self.data});
         }
     };
-
-    /// A none value.
-    void,
-    /// Contains an immutable symbol. The memory allocation for the slice is not managed by Val.
-    symbol: *String,
-    /// A bool.
-    boolean: bool,
-    /// An integer.
-    int: i64,
-    /// A float.
-    float: f64,
-    /// A mutable string.
-    string: *String,
-    /// A function. The memory allocation for this is not managed by Val.
-    function: *const Function,
 
     /// Pretty print the value.
     pub fn format(self: *const Val, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
@@ -79,7 +79,6 @@ pub const Val = union(Type) {
 };
 
 test "val size is small" {
-    // TODO: Reduce this to 2 words.
     try std.testing.expectEqual(2 * @sizeOf(usize), @sizeOf(Val));
 }
 

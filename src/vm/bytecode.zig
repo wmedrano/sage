@@ -87,7 +87,7 @@ pub const ByteCodeFunc = struct {
 
     fn initImpl(ir: *const Ir, res: *std.ArrayList(ByteCode), constants: *std.ArrayListUnmanaged(Val)) !void {
         switch (ir.*) {
-            Ir.constant => |val| {
+            .constant => |val| {
                 const val_idx = constants.items.len;
                 try res.append(.{ .push_const = val_idx });
                 try constants.append(res.allocator, val);
@@ -95,12 +95,12 @@ pub const ByteCodeFunc = struct {
                     try res.append(.deref);
                 }
             },
-            Ir.function_call => |f| {
+            .function_call => |f| {
                 try ByteCodeFunc.initImpl(f.function, res, constants);
                 for (f.args) |a| try ByteCodeFunc.initImpl(a, res, constants);
                 try res.append(.{ .eval = f.args.len + 1 });
             },
-            Ir.if_expr => |expr| {
+            .if_expr => |expr| {
                 try initImpl(expr.predicate, res, constants);
                 // True branch
                 var true_expr_res = std.ArrayList(ByteCode).init(res.allocator);
@@ -116,6 +116,7 @@ pub const ByteCodeFunc = struct {
                 try res.append(.{ .jump = true_expr_res.items.len });
                 try res.appendSlice(true_expr_res.items);
             },
+            .lambda => return error.NotImplemented,
         }
     }
 };
@@ -213,4 +214,10 @@ test "if statement without false branch uses void false branch" {
         .{ .int = 1 },
         .void,
     }, actual.constants.items);
+}
+
+test "lambda is not implemented" {
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    try std.testing.expectError(error.NotImplemented, ByteCodeFunc.initStrExpr("(lambda (a b) (+ a b))", &heap));
 }

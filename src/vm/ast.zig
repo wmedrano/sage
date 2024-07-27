@@ -11,8 +11,13 @@ const SyntaxError = error{
 };
 
 pub const Leaf = union(enum) {
-    /// An if expression.
-    if_expr,
+    /// A keyword.
+    keyword: enum {
+        // "if"
+        if_expr,
+        // "lambda"
+        lambda,
+    },
     /// A reference to a variable or constant. The name is stored as a string.
     identifier: []const u8,
     /// A string literal. The contents (without the literal quotes) are stored as a string.
@@ -27,7 +32,10 @@ pub const Leaf = union(enum) {
     /// Pretty print the AST.
     pub fn format(self: *const Leaf, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
-            .if_expr => try writer.print("if", .{}),
+            .keyword => |k| switch (k) {
+                .if_expr => try writer.print("if", .{}),
+                .lambda => try writer.print("lambda", .{}),
+            },
             .identifier => |s| try writer.print("identifier({s})", .{s}),
             .string => |s| try writer.print("string({s})", .{s}),
             .boolean => |b| try writer.print("{any}", .{b}),
@@ -46,7 +54,10 @@ pub const Leaf = union(enum) {
             return .{ .boolean = false };
         }
         if (std.mem.eql(u8, "if", ident)) {
-            return .if_expr;
+            return .{ .keyword = .if_expr };
+        }
+        if (std.mem.eql(u8, "lambda", ident)) {
+            return .{ .keyword = .lambda };
         }
         if (std.fmt.parseInt(i64, ident, 10)) |i| {
             return .{ .int = i };
@@ -185,15 +196,41 @@ test "basic expression is parsed" {
                         .{ .leaf = .{ .string = "hello" } },
                     } },
                     .{ .tree = &.{
-                        .{ .leaf = .if_expr },
+                        .{ .leaf = .{ .keyword = .if_expr } },
                         .{ .leaf = .{ .boolean = true } },
                         .{ .leaf = .{ .int = 10 } },
                     } },
                     .{ .tree = &.{
-                        .{ .leaf = .if_expr },
+                        .{ .leaf = .{ .keyword = .if_expr } },
                         .{ .leaf = .{ .boolean = false } },
                         .{ .leaf = .{ .int = 11 } },
                         .{ .leaf = .{ .int = 12 } },
+                    } },
+                },
+            },
+        },
+        .alloc = std.testing.allocator,
+    }, ast);
+}
+
+test "lambda is parsed" {
+    var t = Tokenizer.init("(lambda (a b) (+ a b))");
+    var ast = try AstCollection.init(&t, std.testing.allocator);
+    defer ast.deinit();
+
+    try std.testing.expectEqualDeep(AstCollection{
+        .asts = &[_]Ast{
+            .{
+                .tree = &.{
+                    .{ .leaf = .{ .keyword = .lambda } },
+                    .{ .tree = &.{
+                        .{ .leaf = .{ .identifier = "a" } },
+                        .{ .leaf = .{ .identifier = "b" } },
+                    } },
+                    .{ .tree = &.{
+                        .{ .leaf = .{ .identifier = "+" } },
+                        .{ .leaf = .{ .identifier = "a" } },
+                        .{ .leaf = .{ .identifier = "b" } },
                     } },
                 },
             },

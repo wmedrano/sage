@@ -1,53 +1,72 @@
 pub const std = @import("std");
 
-pub const Options = struct {
-    /// The number of iterations to run as a warmup.
-    warmup_samples: usize = 100,
-    /// The number of samples to collect.
-    samples: usize = 100000,
-    /// The allocator to user for intermediate results.
-    alloc: std.mem.Allocator,
-};
+pub const Benchmark = struct {
+    name: []const u8,
+    timings: std.ArrayList(u64),
 
-/// Run the benchmarks defined by b. See TestBenchmark for an example benchmark. The benchmark type
-/// (BenchmarkType) must have the following properties:
-/// name - A declaration or variable containing the string name of the benchmark.
-/// init - A method that takes the *BenchmarkType object and returns !void. Runs befor each sample.
-/// cleanup - A methed that takes the *BenchmarkType object and returns !void. Runs after each
-///     sample.
-/// run - A method that takes the *BenchmarkType object and returns !anytype.
-pub fn runBenchmark(BType: type, b: *BType, options: Options) !void {
-    const name = @field(b, "name");
-    var timer = try std.time.Timer.start();
-    std.debug.print("{s:-^80}\n", .{name});
-    std.debug.print("warmup-samples: {any}\n", .{options.warmup_samples});
-    for (0..options.warmup_samples) |_| {
-        if (@hasDecl(BType, "beforeRun")) {
-            try b.beforeRun();
+    pub const Options = struct {
+        /// The number of iterations to run as a warmup.
+        warmup_samples: usize = 100,
+        /// The number of samples to collect.
+        samples: usize = 100000,
+        /// If the results should be printed out.
+        print_results: bool = true,
+        /// The allocator to user for intermediate results.
+        alloc: std.mem.Allocator,
+    };
+
+    /// Run the benchmarks defined by b. See TestBenchmark for an example benchmark. The benchmark type
+    /// (BenchmarkType) must have the following properties:
+    /// name - A declaration or variable containing the string name of the benchmark.
+    /// init - A method that takes the *BenchmarkType object and returns !void. Runs befor each sample.
+    /// cleanup - A methed that takes the *BenchmarkType object and returns !void. Runs after each
+    ///     sample.
+    /// run - A method that takes the *BenchmarkType object and returns !anytype.
+    pub fn run(BType: type, b: *BType, options: Options) !Benchmark {
+        const name = try options.alloc.dupe(u8, @field(b, "name"));
+        var timer = try std.time.Timer.start();
+        if (options.print_results) {
+            std.debug.print("{s:-^80}\n", .{name});
+            std.debug.print("warmup-samples: {any}\n", .{options.warmup_samples});
         }
-        _ = try b.run();
-        if (@hasDecl(BType, "afterRun")) {
-            try b.afterRun();
+        for (0..options.warmup_samples) |_| {
+            if (@hasDecl(BType, "beforeRun")) {
+                try b.beforeRun();
+            }
+            _ = try b.run();
+            if (@hasDecl(BType, "afterRun")) {
+                try b.afterRun();
+            }
         }
+        if (options.print_results) {
+            std.debug.print("benchmark-samples: {any}\n", .{options.samples});
+        }
+        var result_nanos = try std.ArrayList(u64).initCapacity(options.alloc, options.samples);
+        errdefer result_nanos.deinit();
+        for (0..options.samples) |_| {
+            if (@hasDecl(BType, "beforeRun")) {
+                try b.beforeRun();
+            }
+            _ = timer.lap();
+            _ = try b.run();
+            const nanos = timer.lap();
+            result_nanos.appendAssumeCapacity(nanos);
+            if (@hasDecl(BType, "afterRun")) {
+                try b.afterRun();
+            }
+        }
+        const avg_nanos = Duration.initAvgNanos(result_nanos.items);
+        if (options.print_results) {
+            std.debug.print("{s}-runtime: {any}\n", .{ name, avg_nanos });
+        }
+        return .{ .name = name, .timings = result_nanos };
     }
-    std.debug.print("benchmark-samples: {any}\n", .{options.samples});
-    var result_nanos = try std.ArrayList(u64).initCapacity(options.alloc, options.samples);
-    defer result_nanos.deinit();
-    for (0..options.samples) |_| {
-        if (@hasDecl(BType, "beforeRun")) {
-            try b.beforeRun();
-        }
-        _ = timer.lap();
-        _ = try b.run();
-        const nanos = timer.lap();
-        result_nanos.appendAssumeCapacity(nanos);
-        if (@hasDecl(BType, "afterRun")) {
-            try b.afterRun();
-        }
+
+    pub fn deinit(self: *Benchmark) void {
+        self.timings.allocator.free(self.name);
+        self.timings.deinit();
     }
-    const avg_nanos = Duration.initAvgNanos(result_nanos.items);
-    std.debug.print("{s}-runtime: {any}\n", .{ name, avg_nanos });
-}
+};
 
 const Duration = struct {
     nanos: f64,
@@ -106,5 +125,8 @@ const TestBenchmark = struct {
 
 test "test benchmark" {
     var b = TestBenchmark{ .alloc = std.testing.allocator };
-    try runBenchmark(TestBenchmark, &b, .{ .warmup_samples = 10, .samples = 10, .alloc = std.testing.allocator });
+    const opts = .{ .warmup_samples = 10, .samples = 10, .print_results = false, .alloc = std.testing.allocator };
+    var res = try Benchmark.run(TestBenchmark, &b, opts);
+    res.deinit();
+    try std.testing.expectEqual(10, res.timings.items.len);
 }
