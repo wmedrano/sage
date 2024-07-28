@@ -31,6 +31,7 @@ pub const Ir = union(enum) {
         false_expr: ?*Ir,
     },
     lambda: struct {
+        name: []const u8,
         exprs: []*Ir,
     },
 
@@ -51,7 +52,7 @@ pub const Ir = union(enum) {
         var builder = IrBuilder{
             .arg_to_idx = std.StringHashMap(usize).init(heap.allocator),
         };
-        return builder.build(ast, heap);
+        return builder.build("_", ast, heap);
     }
 
     /// Initialize an Ir from a string expression.
@@ -106,7 +107,7 @@ const IrBuilder = struct {
     const Error = Ir.Error;
 
     /// Build an Ir from IrBuilder.
-    pub fn build(self: *IrBuilder, ast: *const Ast, heap: *Heap) !*Ir {
+    pub fn build(self: *IrBuilder, name: []const u8, ast: *const Ast, heap: *Heap) !*Ir {
         switch (ast.*) {
             .leaf => return self.buildLeaf(&ast.leaf, heap),
             .tree => |asts| {
@@ -131,7 +132,7 @@ const IrBuilder = struct {
                                     if (rest.len < 2) {
                                         return Error.NotEnoughArguments;
                                     }
-                                    return self.buildLambdaExpr(&rest[0], rest[1..], heap);
+                                    return self.buildLambdaExpr(name, &rest[0], rest[1..], heap);
                                 },
                                 .define => {
                                     switch (rest.len) {
@@ -184,19 +185,20 @@ const IrBuilder = struct {
     }
 
     fn buildDefine(self: *IrBuilder, sym: *const Ast, def: *const Ast, heap: *Heap) Error!*Ir {
-        const sym_val = switch (sym.*) {
+        const name = switch (sym.*) {
             .tree => return Error.ExpectedIdentifier,
             .leaf => |l| switch (l) {
-                .identifier => |ident| try heap.allocGlobalSymbol(ident),
+                .identifier => |ident| ident,
                 else => return Error.ExpectedIdentifier,
             },
         };
+        const sym_val = try heap.allocGlobalSymbol(name);
         const args = try heap.allocator.alloc(*Ir, 2);
         errdefer heap.allocator.free(args);
         args[0] = try heap.allocator.create(Ir);
         errdefer args[0].deinit(heap.allocator);
         args[0].* = .{ .constant = sym_val };
-        args[1] = try self.build(def, heap);
+        args[1] = try self.build(name, def, heap);
         errdefer args[1].deinit(heap.allocator);
         const ret = try heap.allocator.create(Ir);
         errdefer ret.deinit(heap.allocator);
@@ -211,13 +213,13 @@ const IrBuilder = struct {
 
     /// Build an Ir containing a function call.
     fn buildFunctionCall(self: *IrBuilder, func_ast: *const Ast, args_ast: []const Ast, heap: *Heap) Error!*Ir {
-        const function = try self.build(func_ast, heap);
+        const function = try self.build("_", func_ast, heap);
         errdefer function.deinit(heap.allocator);
         var args = try std.ArrayListUnmanaged(*Ir).initCapacity(heap.allocator, args_ast.len);
         errdefer args.deinit(heap.allocator);
         errdefer for (args.items) |*a| a.*.deinit(heap.allocator);
         for (args_ast) |*a| {
-            args.appendAssumeCapacity(try self.build(a, heap));
+            args.appendAssumeCapacity(try self.build("_", a, heap));
         }
         const ret = try heap.allocator.create(Ir);
         ret.* = .{ .function_call = .{
@@ -229,13 +231,13 @@ const IrBuilder = struct {
 
     /// Build an Ir containing a function call.
     fn buildIfExpression(self: *IrBuilder, pred_expr: *const Ast, true_expr: *const Ast, false_expr: ?*const Ast, heap: *Heap) Error!*Ir {
-        const pred_ir = try self.build(pred_expr, heap);
+        const pred_ir = try self.build("_", pred_expr, heap);
         errdefer pred_ir.deinit(heap.allocator);
 
-        const true_ir = try self.build(true_expr, heap);
+        const true_ir = try self.build("_", true_expr, heap);
         errdefer true_ir.deinit(heap.allocator);
 
-        const false_ir = if (false_expr) |e| try self.build(e, heap) else null;
+        const false_ir = if (false_expr) |e| try self.build("_", e, heap) else null;
         errdefer if (false_ir) |i| i.deinit(heap.allocator);
 
         const ret = try heap.allocator.create(Ir);
@@ -248,7 +250,7 @@ const IrBuilder = struct {
     }
 
     /// Build an Ir containing a lambda definition.
-    fn buildLambdaExpr(_: *IrBuilder, arguments: *const Ast, body: []const Ast, heap: *Heap) Error!*Ir {
+    fn buildLambdaExpr(_: *IrBuilder, name: []const u8, arguments: *const Ast, body: []const Ast, heap: *Heap) Error!*Ir {
         if (body.len == 0) {
             return Error.ExpectedExpr;
         }
@@ -271,15 +273,16 @@ const IrBuilder = struct {
             },
         }
         var exprs = try heap.allocator.alloc(*Ir, body.len);
-        errdefer for (exprs) |e| e.deinit(heap.allocator);
         errdefer heap.allocator.free(exprs);
         for (0.., body) |i, *b| {
-            const expr = try lambda_builder.build(b, heap);
+            const expr = try lambda_builder.build("_", b, heap);
+            errdefer expr.deinit(heap.allocator);
             exprs[i] = expr;
         }
 
         const ret = try heap.allocator.create(Ir);
         ret.* = .{ .lambda = .{
+            .name = name,
             .exprs = exprs,
         } };
         return ret;
@@ -353,6 +356,7 @@ test "parse lambda" {
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&Ir{
         .lambda = .{
+            .name = "_",
             .exprs = @constCast(&[_]*Ir{
                 @constCast(&Ir{
                     .function_call = .{
@@ -395,4 +399,38 @@ test "lambda with improper args produces error" {
     var works = try Ir.initStrExpr("(lambda () true)", &heap);
     works.deinit(std.testing.allocator);
     try std.testing.expectError(error.ExpectedIdentifierList, Ir.initStrExpr("(lambda not-a-list true)", &heap));
+}
+
+test "define on lambda produces named function" {
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    var actual = try Ir.initStrExpr("(define foo (lambda () (lambda () 10)))", &heap);
+    defer actual.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(&Ir{
+        .function_call = .{
+            .function = @constCast(&Ir{ .deref = "%define" }),
+            .args = @constCast(&[_]*Ir{
+                @constCast(&Ir{ .constant = try heap.allocGlobalSymbol("foo") }),
+                @constCast(&Ir{
+                    .lambda = .{
+                        .name = "foo",
+                        .exprs = @constCast(&[_]*Ir{
+                            @constCast(&Ir{
+                                .lambda = .{
+                                    .name = "_",
+                                    .exprs = @constCast(&[_]*Ir{@constCast(&Ir{ .constant = .{ .int = 10 } })}),
+                                },
+                            }),
+                        }),
+                    },
+                }),
+            }),
+        },
+    }, actual);
+}
+
+test "nested lambda with error produces error" {
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    try std.testing.expectError(Ir.Error.NotEnoughArguments, Ir.initStrExpr("(define foo (lambda () (lambda ())))", &heap));
 }
