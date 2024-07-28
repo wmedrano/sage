@@ -12,8 +12,9 @@ const Val = @import("val.zig").Val;
 pub const ByteCode = union(enum) {
     /// Push a constant to the stack. Contains the index to the constant within the constants array.
     push_const: usize,
-    /// Replace the top symbol value in the stack with its real value.
-    deref,
+    /// Replace the top symbol value in the stack with its real value. Contains the index to the
+    /// constant within the constants array. The constant must be a symbol.
+    deref: usize,
     /// Get the nth argument.
     get_arg: usize,
     /// Evaluate the top n elements in the stack. The deepest element should contain a function with
@@ -34,7 +35,7 @@ pub const ByteCode = union(enum) {
     pub fn format(self: *const ByteCode, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self.*) {
             .push_const => |v| try writer.print("push_const({any})", .{v}),
-            .deref => try writer.print("deref", .{}),
+            .deref => |n| try writer.print("deref({any})", .{n}),
             .get_arg => |n| try writer.print("get_arg({})", .{n}),
             .eval => |n| try writer.print("eval({})", .{n}),
             .jump => |n| try writer.print("jump({})", .{n}),
@@ -101,11 +102,7 @@ pub const ByteCodeFunc = struct {
                 const val_idx = constants.items.len;
                 const symbol_val = try heap.allocGlobalSymbol(d);
                 try constants.append(heap.allocator, symbol_val);
-                // TODO: Create a single instruction that derefs.
-                try res.appendSlice(heap.allocator, &[_]ByteCode{
-                    .{ .push_const = val_idx },
-                    .deref,
-                });
+                try res.append(heap.allocator, .{ .deref = val_idx });
             },
             .get_arg => |idx| try res.append(heap.allocator, .{ .get_arg = idx }),
             .function_call => |f| {
@@ -196,12 +193,10 @@ test "simple expression" {
     var actual = try ByteCodeFunc.initStrExpr("(+ 1 2 variable)", &heap);
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&[_]ByteCode{
-        .{ .push_const = 0 },
-        .deref,
+        .{ .deref = 0 },
         .{ .push_const = 1 },
         .{ .push_const = 2 },
-        .{ .push_const = 3 },
-        .deref,
+        .{ .deref = 3 },
         .{ .eval = 4 },
         .ret,
     }, actual.instructions);

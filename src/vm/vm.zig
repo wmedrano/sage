@@ -157,7 +157,7 @@ pub const Vm = struct {
         const instruction = function_frame.bytecode.instructions[function_frame.bytecode_idx];
         switch (instruction) {
             .push_const => |i| try self.executePushConst(function_frame.bytecode, i),
-            .deref => try self.executeDeref(),
+            .deref => |i| try self.executeDeref(function_frame.bytecode, i),
             .get_arg => |n| try self.executeGetArg(n),
             .eval => |n| try self.executeEval(n),
             .jump => |n| self.executeJump(n),
@@ -175,12 +175,12 @@ pub const Vm = struct {
     }
 
     /// Execute the deref instruction.
-    fn executeDeref(self: *Vm) VmError!void {
-        const v = switch (self.stack.getLast()) {
+    fn executeDeref(self: *Vm, bc: *const ByteCodeFunc, idx: usize) VmError!void {
+        const v = switch (bc.constants[idx]) {
             Val.Type.symbol => |s| self.getSymbol(s.data) orelse return VmError.UndefinedSymbol,
             else => return VmError.WrongType,
         };
-        self.stack.items[self.stack.items.len - 1] = v;
+        try self.stack.append(self.allocator(), v);
     }
 
     fn executeGetArg(self: *Vm, n: usize) VmError!void {
@@ -302,7 +302,7 @@ test "wrong args halts VM and maintains VM state" {
         .{ .int = 4 },
     });
     try std.testing.expectEqualDeep(vm.function_frames.items, &[_]FunctionFrame{
-        .{ .bytecode = &bc, .stack_start = 0, .bytecode_idx = 6 },
+        .{ .bytecode = &bc, .stack_start = 0, .bytecode_idx = 4 },
     });
 }
 

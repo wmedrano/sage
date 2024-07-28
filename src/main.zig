@@ -55,5 +55,5 @@ pub fn main() !void {
 }
 
 test {
-    std.testing.refAllDecls(@This());
+    std.testing.refAllDeclsRecursive(@import("vm/vm.zig"));
 }

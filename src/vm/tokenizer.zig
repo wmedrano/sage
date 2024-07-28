@@ -114,11 +114,11 @@ pub const Tokenizer = struct {
 };
 
 test "parse expression" {
-    var tokenizer = Tokenizer.init(" (parse-expression-1  234)");
+    var tokenizer = Tokenizer.init("  (parse-expression-1  234)");
     const result = try tokenizer.collectAll(std.testing.allocator);
     defer result.deinit();
     try std.testing.expectEqualDeep(&[_]Token{
-        .{ .typ = .whitespace, .contents = " " },
+        .{ .typ = .whitespace, .contents = "  " },
         .{ .typ = .openParen, .contents = "(" },
         .{ .typ = .identifier, .contents = "parse-expression-1" },
         .{ .typ = .whitespace, .contents = "  " },
