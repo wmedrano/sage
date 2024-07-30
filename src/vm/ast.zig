@@ -114,7 +114,7 @@ pub const AstCollection = struct {
     /// The Allocator that was used to allocate the ASTs.
     alloc: std.mem.Allocator,
 
-    // Creates a new Ast. Some fields may reference data from the tokenizer. Other items // will use
+    // Creates a new Ast. Some fields may reference data from the tokenizer. Other items will use
     // alloc to allocate memory.
     pub fn init(t: *Tokenizer, alloc: std.mem.Allocator) SyntaxError!AstCollection {
         const asts = try AstCollection.initImpl(t, false, alloc);
@@ -133,14 +133,18 @@ pub const AstCollection = struct {
 
     /// Deallocate all ASTs within the collection.
     pub fn deinit(self: AstCollection) void {
-        for (self.asts) |*a| deinitAst(a, self.alloc);
-        self.alloc.free(self.asts);
+        deinitAstSlice(self.asts, self.alloc);
     }
 
     fn initImpl(t: *Tokenizer, want_close: bool, alloc: std.mem.Allocator) SyntaxError![]Ast {
         var result = std.ArrayList(Ast).init(alloc);
         defer result.deinit();
-        errdefer for (result.items) |*a| deinitAst(a, alloc);
+        errdefer for (result.items) |r| {
+            switch (r) {
+                .tree => |tr| alloc.free(tr),
+                .leaf => {},
+            }
+        };
         var has_close = false;
         while (t.next()) |token| {
             switch (token.typ) {
@@ -173,16 +177,16 @@ pub const AstCollection = struct {
     }
 };
 
-fn deinitAst(ast: *const Ast, alloc: std.mem.Allocator) void {
-    switch (ast.*) {
-        Ast.leaf => {},
-        Ast.tree => |tree| {
-            for (tree) |*node| {
-                deinitAst(node, alloc);
-            }
-            alloc.free(tree);
-        },
+fn deinitAstSlice(ast: []const Ast, alloc: std.mem.Allocator) void {
+    for (ast) |*a| {
+        switch (a.*) {
+            Ast.leaf => {},
+            Ast.tree => |tree| {
+                deinitAstSlice(tree, alloc);
+            },
+        }
     }
+    alloc.free(ast);
 }
 
 test "basic expression is parsed" {

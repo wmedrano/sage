@@ -127,19 +127,21 @@ pub const ByteCodeFunc = struct {
                 try res.appendSlice(heap.allocator, true_expr_res.items);
             },
             .lambda => |lambda| {
-                var instructions = std.ArrayListUnmanaged(ByteCode){};
+                var l_instructions = std.ArrayListUnmanaged(ByteCode){};
+                errdefer l_instructions.deinit(heap.allocator);
                 var l_constants = std.ArrayListUnmanaged(Val){};
+                errdefer l_constants.deinit(heap.allocator);
                 for (lambda.exprs) |expr| {
-                    try ByteCodeFunc.initImpl(expr, &instructions, &l_constants, heap);
+                    try ByteCodeFunc.initImpl(expr, &l_instructions, &l_constants, heap);
                 }
-                try instructions.append(heap.allocator, .ret);
+                try l_instructions.append(heap.allocator, .ret);
                 const lambda_fn = try heap.allocFunction();
                 lambda_fn.* = .{
-                    .name = "_",
+                    .name = try heap.allocator.dupe(u8, lambda.name),
                     .is_static = false,
                     .function = .{
                         .bytecode = .{
-                            .instructions = try instructions.toOwnedSlice(heap.allocator),
+                            .instructions = try l_instructions.toOwnedSlice(heap.allocator),
                             .constants = try l_constants.toOwnedSlice(heap.allocator),
                         },
                     },
@@ -154,20 +156,6 @@ pub const ByteCodeFunc = struct {
         }
     }
 };
-
-fn leafToVal(l: *const Leaf, alloc: std.mem.Allocator) !Val {
-    switch (l.*) {
-        Leaf.identifier => return .{ .symbol = l.identifier },
-        Leaf.string => return try Val.initStrExpring(l.string, alloc),
-        Leaf.int => return .{ .int = l.int },
-        Leaf.float => return .{ .float = l.float },
-    }
-}
-
-fn deinitArrayList(comptime T: type, arr: *std.ArrayList(T)) void {
-    for (arr.items) |x| x.deinit(arr.allocator);
-    arr.deinit();
-}
 
 test "bytecode size is small" {
     try std.testing.expectEqual(2 * @sizeOf(usize), @sizeOf(ByteCode));
@@ -258,4 +246,31 @@ test "lambda is pushed" {
         .ret,
     }, actual.instructions);
     try std.testing.expectEqual(1, actual.constants.len);
+}
+
+test "recursive function" {
+    var heap = Heap.init(std.testing.allocator);
+    defer heap.deinit();
+    var actual = try ByteCodeFunc.initStrExpr(
+        "(define fib (lambda (n) (if (< n 1) 0 (if (< n 3) 1 (+ (fib (- n 1)) (fib (- n 2)))))))",
+        &heap,
+    );
+    defer actual.deinit(std.testing.allocator);
+    try std.testing.expectEqualDeep(&[_]ByteCode{
+        .{ .deref = 0 },
+        .{ .push_const = 1 },
+        .{ .push_const = 2 },
+        .{ .eval = 3 },
+        .ret,
+    }, actual.instructions);
+    try std.testing.expectEqual(1, heap.global_functions.items.len);
+    try std.testing.expectEqualDeep(&[_]Val{
+        try heap.allocGlobalSymbol("%define"),
+        try heap.allocGlobalSymbol("fib"),
+        .{ .function = heap.global_functions.items[0] },
+    }, actual.constants);
+    try std.testing.expectEqualDeep(
+        heap.global_functions.items[0].name,
+        "fib",
+    );
 }

@@ -13,8 +13,8 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const test_exe = b.addTest(.{
-        .name = "sage-tests",
-        .root_source_file = b.path("src/main.zig"),
+        .name = "vm-tests",
+        .root_source_file = b.path("src/vm/tests.zig"),
         .target = target,
         .optimize = optimize,
     });

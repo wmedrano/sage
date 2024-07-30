@@ -45,6 +45,7 @@ pub const Val = union(Type) {
 
         pub fn deinit(self: *Function, allocator: std.mem.Allocator) void {
             if (self.is_static) return;
+            allocator.free(self.name);
             switch (self.function) {
                 .native => {},
                 .bytecode => |*bc| {

@@ -72,7 +72,7 @@ pub const Ir = union(enum) {
             .get_arg => {},
             .function_call => |*f| {
                 f.function.deinit(alloc);
-                for (f.args) |*a| a.*.deinit(alloc);
+                for (f.args) |a| a.deinit(alloc);
                 alloc.free(f.args);
             },
             .if_expr => |*expr| {
@@ -418,7 +418,9 @@ test "define on lambda produces named function" {
                             @constCast(&Ir{
                                 .lambda = .{
                                     .name = "_",
-                                    .exprs = @constCast(&[_]*Ir{@constCast(&Ir{ .constant = .{ .int = 10 } })}),
+                                    .exprs = @constCast(&[_]*Ir{
+                                        @constCast(&Ir{ .constant = .{ .int = 10 } }),
+                                    }),
                                 },
                             }),
                         }),
