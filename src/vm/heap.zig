@@ -60,7 +60,7 @@ pub const Heap = struct {
             return .{ .string = global_s };
         }
         const s_copy = try Val.String.init(self.allocator, s);
-        try self.global_strings.put(self.allocator, s_copy.data, s_copy);
+        try self.global_strings.put(self.allocator, s_copy.asSlice(), s_copy);
         return Val{ .string = s_copy };
     }
 
@@ -69,7 +69,7 @@ pub const Heap = struct {
             return .{ .symbol = global_s };
         }
         const s_copy = try Val.String.init(self.allocator, s);
-        try self.global_strings.put(self.allocator, s_copy.data, s_copy);
+        try self.global_strings.put(self.allocator, s_copy.asSlice(), s_copy);
         return Val{ .symbol = s_copy };
     }
 

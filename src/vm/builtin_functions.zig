@@ -18,7 +18,7 @@ fn stringLengthFunction(_: *Vm, args: []Val) Error!Val {
         return error.RuntimeError;
     }
     switch (args[0]) {
-        Val.Type.string => |s| return .{ .int = @intCast(s.data.len) },
+        Val.Type.string => |s| return .{ .int = @intCast(s.asSlice().len) },
         else => return error.RuntimeError,
     }
 }
@@ -36,7 +36,7 @@ fn defineFunction(vm: *Vm, args: []Val) Val.Function.Error!Val {
         2 => {
             switch (args[0]) {
                 .symbol => |s| {
-                    try vm.defineVal(s.data, args[1]);
+                    try vm.defineVal(s.asSlice(), args[1]);
                 },
                 else => return error.RuntimeError,
             }

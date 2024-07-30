@@ -55,21 +55,54 @@ pub const Val = union(Type) {
         }
     };
 
+    /// Contains a string on the heap.
     pub const String = struct {
-        data: []const u8,
+        len: usize,
 
-        pub fn init(alloc: std.mem.Allocator, data: []const u8) !*String {
-            var s = try alloc.create(String);
-            s.data = try alloc.dupe(u8, data);
-            return s;
+        /// Create a new String2 that copies the contents of data.
+        pub fn init(allocator: std.mem.Allocator, data: []const u8) !*String {
+            const allocation = try allocator.alloc(u8, @sizeOf(usize) + data.len);
+            const self = @as(*String, @ptrCast(@alignCast(&allocation[0])));
+            self.len = data.len;
+            @memcpy(allocation[@sizeOf(usize)..], data);
+            return self;
         }
 
+        /// Deallocate the memory from String2.
         pub fn deinit(self: *String, allocator: std.mem.Allocator) void {
-            allocator.free(self.data);
-            allocator.destroy(self);
+            allocator.free(self.rawAllocation());
         }
+
+        /// Return the data held by the String2.
+        pub fn asSlice(self: *const String) []u8 {
+            return self.rawAllocation()[@sizeOf(usize)..];
+        }
+
         pub fn format(self: *const String, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-            try writer.print("{s}", .{self.data});
+            try writer.print("{s}", .{self.asSlice()});
+        }
+
+        /// Get the underlying allocation as a slice. This includes any metadata and data associated
+        /// with String2.
+        fn rawAllocation(self: *const String) []u8 {
+            var result: []u8 = undefined;
+            result.len = @sizeOf(usize) + self.len;
+            result.ptr = @constCast(@ptrCast(self));
+            return result;
+        }
+
+        test "init copies slice" {
+            const test_string = "test string";
+            var s = try String.init(std.testing.allocator, test_string);
+            defer s.deinit(std.testing.allocator);
+            try std.testing.expectEqualStrings(test_string, s.asSlice());
+            try std.testing.expect(test_string.ptr != s.asSlice().ptr);
+        }
+
+        test "init handles empty slice" {
+            var s = try String.init(std.testing.allocator, "");
+            defer s.deinit(std.testing.allocator);
+            try std.testing.expectEqualStrings("", s.asSlice());
         }
     };
 

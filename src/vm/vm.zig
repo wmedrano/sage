@@ -79,12 +79,13 @@ pub const Vm = struct {
     pub fn defineVal(self: *Vm, symbol: []const u8, val: Val) !void {
         const symbol_val = try self.heap.allocGlobalSymbol(symbol);
         const symbol_str = switch (symbol_val) {
-            .symbol => |s| s.data,
+            .symbol => |s| s.asSlice(),
             else => unreachable,
         };
         try self.values.put(self.allocator(), symbol_str, val);
     }
 
+    /// Get the current function frame.
     pub fn currentFunctionFrame(self: *const Vm) ?*FunctionFrame {
         const function_frames_count = self.function_frames.items.len;
         if (function_frames_count == 0) return null;
@@ -121,6 +122,7 @@ pub const Vm = struct {
         return self.runWithDebugger(bc, args, &debugger);
     }
 
+    /// Run the garbage collector.
     pub fn runGc(self: *Vm) !void {
         self.references.reset();
         try self.references.markVals(self.stack.items);
@@ -177,7 +179,7 @@ pub const Vm = struct {
     /// Execute the deref instruction.
     fn executeDeref(self: *Vm, bc: *const ByteCodeFunc, idx: usize) VmError!void {
         const v = switch (bc.constants[idx]) {
-            Val.Type.symbol => |s| self.getSymbol(s.data) orelse return VmError.UndefinedSymbol,
+            Val.Type.symbol => |s| self.getSymbol(s.asSlice()) orelse return VmError.UndefinedSymbol,
             else => return VmError.WrongType,
         };
         try self.stack.append(self.allocator(), v);

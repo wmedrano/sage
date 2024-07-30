@@ -4,11 +4,7 @@ const Terminal = struct {
     tty: std.fs.File,
     original_terminfo: std.os.linux.termios,
 
-    pub const Options = struct {
-        timeout_deciseconds: usize = 1,
-    };
-
-    pub fn init(options: Options) !Terminal {
+    pub fn init() !Terminal {
         var tty = try std.fs.cwd().openFile("/dev/tty", .{ .mode = .read_write });
         errdefer tty.close();
         if (!tty.isTty()) {
@@ -32,11 +28,10 @@ const Terminal = struct {
         terminfo.lflag.ISIG = false;
         terminfo.lflag.NOFLSH = false;
         terminfo.lflag.TOSTOP = false;
-        terminfo.cc[std.os.linux.VTIME] = options.timeout_deciseconds;
-        if (std.os.linux.tcsetattr(tty.handle, std.os.linux.TCSA.NOW, &terminfo) != 0) {
+        if (std.os.linux.tcsetattr(tty.handle, std.c.TCSA.NOW, &terminfo) != 0) {
             return error.TerminalNotSupported;
         }
-        errdefer _ = std.os.linux.tcsetattr(tty.handle, std.os.linux.TCSA.NOW, &original_terminfo);
+        errdefer _ = std.os.linux.tcsetattr(tty.handle, std.c.TCSA.NOW, &original_terminfo);
 
         _ = try tty.write("\x1b[?1049h"); // Enable alternative screen.
         _ = try tty.write("\x1b[?25l"); // Disable cursor.
@@ -62,19 +57,19 @@ const Terminal = struct {
     pub fn deinit(self: *Terminal) void {
         _ = self.tty.write("\x1b[?25h") catch {}; // Enable cursor.
         _ = self.tty.write("\x1b[?1049l") catch {}; // Disable alternative screen.
-        _ = std.os.linux.tcsetattr(self.tty.handle, std.os.linux.TCSA.NOW, &self.original_terminfo);
+        _ = std.os.linux.tcsetattr(self.tty.handle, std.c.TCSA.NOW, &self.original_terminfo);
         self.tty.close();
+        std.debug.print("Term reverted to {any}\n", .{self.original_terminfo});
     }
 };
 
 pub fn main() !void {
-    var term = try Terminal.init(.{});
+    var term = try Terminal.init();
     defer term.deinit();
     try term.moveCursor(1, 1);
     try term.clearDisplay(.screen);
     var buffer: [100]u8 = undefined;
     for (0..20) |idx| {
-        std.time.sleep(1 * std.time.ns_per_s);
         const input_size = try term.tty.read(&buffer);
         const input = buffer[0..input_size];
         try term.tty.writer().print("{any}(size={d}): {s}\n", .{ idx, input.len, input });
@@ -82,6 +77,6 @@ pub fn main() !void {
 }
 
 test "terminal" {
-    var term = try Terminal.init(.{});
+    var term = try Terminal.init();
     defer term.deinit();
 }
