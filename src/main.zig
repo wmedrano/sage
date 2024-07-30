@@ -1,59 +1,87 @@
 pub const std = @import("std");
-pub const Tokenizer = @import("vm/tokenizer.zig").Tokenizer;
-pub const AstCollection = @import("vm/ast.zig").AstCollection;
-pub const ByteCodeFunc = @import("vm/bytecode.zig").ByteCodeFunc;
-pub const ir = @import("vm/ir.zig");
-pub const vm = @import("vm/vm.zig");
+
+const Terminal = struct {
+    tty: std.fs.File,
+    original_terminfo: std.os.linux.termios,
+
+    pub const Options = struct {
+        timeout_deciseconds: usize = 1,
+    };
+
+    pub fn init(options: Options) !Terminal {
+        var tty = try std.fs.cwd().openFile("/dev/tty", .{ .mode = .read_write });
+        errdefer tty.close();
+        if (!tty.isTty()) {
+            return error.TerminalNotSupported;
+        }
+        if (!tty.getOrEnableAnsiEscapeSupport()) {
+            return error.TerminalNotSupported;
+        }
+
+        var terminfo: std.os.linux.termios = std.mem.zeroes(std.os.linux.termios);
+        if (std.os.linux.tcgetattr(tty.handle, &terminfo) != 0) {
+            return error.TerminalNotSupported;
+        }
+        const original_terminfo = terminfo;
+        terminfo.lflag.ECHO = false;
+        terminfo.lflag.ECHOE = false;
+        terminfo.lflag.ECHOK = false;
+        terminfo.lflag.ECHONL = false;
+        terminfo.lflag.ICANON = false;
+        terminfo.lflag.IEXTEN = false;
+        terminfo.lflag.ISIG = false;
+        terminfo.lflag.NOFLSH = false;
+        terminfo.lflag.TOSTOP = false;
+        terminfo.cc[std.os.linux.VTIME] = options.timeout_deciseconds;
+        if (std.os.linux.tcsetattr(tty.handle, std.os.linux.TCSA.NOW, &terminfo) != 0) {
+            return error.TerminalNotSupported;
+        }
+        errdefer _ = std.os.linux.tcsetattr(tty.handle, std.os.linux.TCSA.NOW, &original_terminfo);
+
+        _ = try tty.write("\x1b[?1049h"); // Enable alternative screen.
+        _ = try tty.write("\x1b[?25l"); // Disable cursor.
+        return Terminal{
+            .tty = tty,
+            .original_terminfo = original_terminfo,
+        };
+    }
+
+    pub fn moveCursor(self: *Terminal, row: u16, col: u16) !void {
+        _ = try self.tty.writer().print("\x1b[{d};{d};H", .{ if (row == 0) 1 else row, if (col == 0) 1 else col });
+    }
+
+    pub fn clearDisplay(self: *Terminal, position: enum { beforeCursor, afterCursor, screen }) !void {
+        const n: u8 = switch (position) {
+            .beforeCursor => '0',
+            .afterCursor => '1',
+            .screen => '2',
+        };
+        _ = try self.tty.writer().print("\x1b[{c}J", .{n});
+    }
+
+    pub fn deinit(self: *Terminal) void {
+        _ = self.tty.write("\x1b[?25h") catch {}; // Enable cursor.
+        _ = self.tty.write("\x1b[?1049l") catch {}; // Disable alternative screen.
+        _ = std.os.linux.tcsetattr(self.tty.handle, std.os.linux.TCSA.NOW, &self.original_terminfo);
+        self.tty.close();
+    }
+};
 
 pub fn main() !void {
-    const use_step_inspector = false;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var alloc = gpa.allocator();
-
-    const stdout = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout);
-    defer bw.flush() catch {};
-
-    var v = try vm.Vm.init(alloc);
-    defer v.deinit();
-
-    var timer = try std.time.Timer.start();
-    const filename = "main.sage";
-    const max_file_size = 1024 * 1024 * 1024; // 1 GiB
-    const contents = try std.fs.cwd().readFileAlloc(alloc, filename, max_file_size);
-    defer alloc.free(contents);
-    var tokenizer = Tokenizer.init(contents);
-    try bw.writer().print("file-read-duration: {any}us\n", .{timer.lap() / std.time.ns_per_us});
-
-    const asts = try AstCollection.init(&tokenizer, alloc);
-    defer asts.deinit();
-    var irs = try std.ArrayList(*ir.Ir).initCapacity(alloc, asts.asts.len);
-    defer irs.deinit();
-    defer for (irs.items) |i| i.deinit(alloc);
-    for (asts.asts) |a| {
-        irs.appendAssumeCapacity(try ir.Ir.init(&a, &v.heap));
+    var term = try Terminal.init(.{});
+    defer term.deinit();
+    try term.moveCursor(1, 1);
+    try term.clearDisplay(.screen);
+    var buffer: [100]u8 = undefined;
+    for (0..20) |idx| {
+        std.time.sleep(1 * std.time.ns_per_s);
+        const input_size = try term.tty.read(&buffer);
+        const input = buffer[0..input_size];
+        try term.tty.writer().print("{any}(size={d}): {s}\n", .{ idx, input.len, input });
     }
-    try bw.writer().print("compile-duration: {any}us\n", .{timer.lap() / std.time.ns_per_us});
-
-    var dbg = @import("debugger.zig").StepInspector{};
-    for (1.., irs.items) |n, i| {
-        var bc = try ByteCodeFunc.init(i, &v.heap);
-        defer bc.deinit(v.heap.allocator);
-        const expr_result = if (use_step_inspector)
-            try v.runWithDebugger(&bc, &.{}, &dbg)
-        else
-            try v.runBytecode(&bc, &.{});
-        try bw.writer().print("${d}: {any}\n", .{ n, expr_result });
-    }
-    const runtime_duration = timer.lap();
-    _ = timer.lap();
-    try v.runGc();
-    const gc_duration = timer.lap();
-    try bw.writer().print("runtime-duration: {any}us\n", .{runtime_duration / std.time.ns_per_us});
-    try bw.writer().print("gc-duration: {any}us\n", .{gc_duration / std.time.ns_per_us});
 }
 
-test {
-    std.testing.refAllDeclsRecursive(@import("vm/vm.zig"));
+test "terminal" {
+    var term = try Terminal.init(.{});
+    defer term.deinit();
 }
