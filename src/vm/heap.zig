@@ -107,10 +107,6 @@ pub const ReferenceMarker = struct {
         self.strings.deinit(self.allocator);
     }
 
-    pub fn reset(self: *ReferenceMarker) void {
-        self.strings.clearRetainingCapacity();
-    }
-
     pub fn containsString(self: *const ReferenceMarker, string: *Val.String) bool {
         return self.strings.contains(string);
     }

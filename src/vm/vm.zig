@@ -1,6 +1,5 @@
 const std = @import("std");
 const tokenizer = @import("tokenizer.zig");
-const ast = @import("ast.zig");
 const ReferenceMarker = @import("heap.zig").ReferenceMarker;
 const Heap = @import("heap.zig").Heap;
 const Val = @import("val.zig").Val;
@@ -46,8 +45,8 @@ pub const Vm = struct {
     values: std.StringHashMapUnmanaged(Val),
     /// Contains all data on the heap.
     heap: Heap,
-    /// Intermediate datastructure for keeping track of references.
-    references: ReferenceMarker,
+    /// Contains allocation used by garbage collector.
+    gc_marker_allocator: std.heap.ArenaAllocator,
 
     /// Initialize a new VM with the given allocator.
     pub fn init(alloc: std.mem.Allocator) VmError!Vm {
@@ -59,7 +58,7 @@ pub const Vm = struct {
             .function_frames = function_frames,
             .values = std.StringHashMapUnmanaged(Val){},
             .heap = heap,
-            .references = ReferenceMarker.init(alloc),
+            .gc_marker_allocator = std.heap.ArenaAllocator.init(alloc),
         };
     }
 
@@ -124,13 +123,14 @@ pub const Vm = struct {
 
     /// Run the garbage collector.
     pub fn runGc(self: *Vm) !void {
-        self.references.reset();
-        try self.references.markVals(self.stack.items);
+        var references = ReferenceMarker.init(self.gc_marker_allocator.allocator());
+        defer _ = self.gc_marker_allocator.reset(.retain_capacity);
+        try references.markVals(self.stack.items);
         var values_iter = self.values.valueIterator();
         while (values_iter.next()) |v| {
-            try self.references.markVal(v.*);
+            try references.markVal(v.*);
         }
-        self.heap.removeGarbage(&self.references);
+        self.heap.removeGarbage(&references);
     }
 
     /// Clear the stack of all its contents.
