@@ -2,6 +2,7 @@ const std = @import("std");
 const Terminal = @import("term/term.zig").Terminal;
 const widgets = @import("term/widgets.zig");
 const Event = @import("term/term.zig").Event;
+const Vm = @import("vm/vm.zig").Vm;
 
 pub fn main() !void {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -28,6 +29,10 @@ fn run_program(allocator: std.mem.Allocator, stats: *Stats) !void {
     defer term.deinit();
     defer stats.double_buffer_size = term.output_buffer.capacity;
     try term.clearDisplay(.screen);
+
+    var vm = try Vm.init(allocator);
+    try vm.defineVal("sage-term", .{ .custom = vm.object_manager.allocCustom(Terminal, "terminal", &term) });
+
     for (0..std.math.maxInt(usize)) |idx| {
         const event = try term.nextEvent();
         try term.clearDisplay(.screen);

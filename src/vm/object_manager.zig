@@ -4,6 +4,7 @@ const Val = @import("val.zig").Val;
 pub const ObjectManager = struct {
     allocator: std.mem.Allocator,
     strings: std.ArrayListUnmanaged(*Val.String),
+    customs: std.ArrayListUnmanaged(*Val.Custom),
     global_strings: std.StringHashMapUnmanaged(*Val.String),
     global_functions: std.ArrayListUnmanaged(*Val.Function),
 
@@ -11,6 +12,7 @@ pub const ObjectManager = struct {
         return .{
             .allocator = allocator,
             .strings = std.ArrayListUnmanaged(*Val.String){},
+            .customs = std.ArrayListUnmanaged(*Val.Custom){},
             .global_strings = std.StringHashMapUnmanaged(*Val.String){},
             .global_functions = std.ArrayListUnmanaged(*Val.Function){},
         };
@@ -30,10 +32,12 @@ pub const ObjectManager = struct {
             self.allocator.destroy(f);
         }
         self.global_functions.deinit(self.allocator);
+        for (self.customs.items) |c| self.allocator.destroy(c);
+        self.customs.deinit(self.allocator);
     }
 
-    pub fn stringCount(self: *const ObjectManager) usize {
-        return self.strings.items.len + @as(usize, self.global_strings.size);
+    pub fn objectCount(self: *const ObjectManager) usize {
+        return self.strings.items.len + self.customs.items.len;
     }
 
     pub fn removeGarbage(self: *ObjectManager, marked: *const ReferenceMarker) void {
@@ -73,8 +77,20 @@ pub const ObjectManager = struct {
         return Val{ .symbol = s_copy };
     }
 
+    pub fn allocCustom(self: *ObjectManager, CustomType: type, type_name: []const u8, value: *CustomType) !*Val.Custom {
+        const res = try self.allocator.create(Val.Custom);
+        errdefer self.allocator.destroy(res);
+        res.* = Val.Custom{
+            .type_name = type_name,
+            .data = @ptrCast(value),
+        };
+        try self.customs.append(self.allocator, res);
+        return res;
+    }
+
     pub fn allocFunction(self: *ObjectManager) !*Val.Function {
         const res = try self.allocator.create(Val.Function);
+        errdefer self.allocator.destroy(res);
         try self.global_functions.append(self.allocator, res);
         return res;
     }
@@ -95,16 +111,19 @@ pub const ObjectManager = struct {
 pub const ReferenceMarker = struct {
     allocator: std.mem.Allocator,
     strings: std.AutoHashMapUnmanaged(*Val.String, void),
+    customs: std.AutoHashMapUnmanaged(*const Val.Custom, void),
 
     pub fn init(allocator: std.mem.Allocator) ReferenceMarker {
         return .{
             .allocator = allocator,
             .strings = std.AutoHashMapUnmanaged(*Val.String, void){},
+            .customs = std.AutoHashMapUnmanaged(*const Val.Custom, void){},
         };
     }
 
     pub fn deinit(self: *ReferenceMarker) void {
         self.strings.deinit(self.allocator);
+        self.customs.deinit(self.allocator);
     }
 
     pub fn containsString(self: *const ReferenceMarker, string: *Val.String) bool {
@@ -124,37 +143,58 @@ pub const ReferenceMarker = struct {
             .float => {},
             .string => |s| try self.markString(s),
             .function => {},
+            .custom => |c| try self.markCustom(c),
         }
     }
 
     pub fn markString(self: *ReferenceMarker, string: *Val.String) !void {
         try self.strings.put(self.allocator, string, {});
     }
+
+    pub fn markCustom(self: *ReferenceMarker, custom: *const Val.Custom) !void {
+        try self.customs.put(self.allocator, custom, {});
+    }
 };
 
 test "object_manager can allocate string" {
-    var h = ObjectManager.init(std.testing.allocator);
-    defer h.deinit();
+    var om = ObjectManager.init(std.testing.allocator);
+    defer om.deinit();
     var test_str_val = try Val.String.init(std.testing.allocator, "test-string");
     defer test_str_val.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(
         Val{ .string = test_str_val },
-        try h.allocString("test-string"),
+        try om.allocString("test-string"),
     );
 }
 
-test "garbage collection removes unused strings" {
-    var h = ObjectManager.init(std.testing.allocator);
-    defer h.deinit();
-    try std.testing.expectEqual(0, h.stringCount());
-    _ = try h.allocString("gc-string");
-    const keep = try h.allocString("keep-string");
-    _ = try h.allocGlobalString("global-string-is-kept");
-    try std.testing.expectEqual(3, h.stringCount());
+test "object_manager can allocate custom" {
+    var om = ObjectManager.init(std.testing.allocator);
+    defer om.deinit();
+    const test_type = "test_type";
+    var test_data: usize = 100;
+    const alloc = try om.allocCustom(usize, test_type, &test_data);
+    try std.testing.expectEqual(Val.Custom{
+        .type_name = test_type,
+        .data = @ptrCast(&test_data),
+    }, alloc.*);
+}
 
+test "garbage collection removes unused strings" {
+    // 2 strings and a global string are allocated
+    //   -> object count is 2
+    var om = ObjectManager.init(std.testing.allocator);
+    defer om.deinit();
+    try std.testing.expectEqual(0, om.objectCount());
+    _ = try om.allocString("gc-string");
+    const keep = try om.allocString("keep-string");
+    _ = try om.allocGlobalString("global-string-is-not-counted");
+    try std.testing.expectEqual(2, om.objectCount());
+
+    // gc cleans up 1 string and leaves the global string
+    //    -> object count is 0
     var refs = ReferenceMarker.init(std.testing.allocator);
     defer refs.deinit();
     try refs.markVal(keep);
-    h.removeGarbage(&refs);
-    try std.testing.expectEqual(2, h.stringCount());
+    om.removeGarbage(&refs);
+    try std.testing.expectEqual(1, om.objectCount());
 }

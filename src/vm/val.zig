@@ -11,6 +11,7 @@ pub const Val = union(Type) {
         float,
         string,
         function,
+        custom,
     };
 
     /// A none value.
@@ -27,6 +28,8 @@ pub const Val = union(Type) {
     string: *String,
     /// A function.
     function: *const Function,
+    /// A custom type.
+    custom: *const Custom,
 
     /// Holds a function that may be called with a slice of Val to return a new Val.
     pub const Function = struct {
@@ -53,6 +56,16 @@ pub const Val = union(Type) {
                 },
             }
         }
+    };
+
+    /// Contains a custom type that may hold anything.
+    pub const Custom = struct {
+        /// The name of the type. The pointer should be unique for each type.
+        type_name: []const u8,
+        /// The pointer to the underlying data.
+        ///
+        /// TODO: Support lifecycle management.
+        data: *void,
     };
 
     /// Contains a string on the object_manager.
@@ -116,6 +129,7 @@ pub const Val = union(Type) {
             .float => |n| try writer.print("float({d})", .{n}),
             .string => |s| try writer.print("string({any})", .{s.*}),
             .function => |f| try writer.print("function({s})", .{f.name}),
+            .custom => |t| try writer.print("custom({s})", .{t.type_name}),
         }
     }
 

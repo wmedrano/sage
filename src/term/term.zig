@@ -169,7 +169,10 @@ pub const Event = struct {
 };
 
 test "terminal is supported" {
-    var term = try Terminal.init(.{ .tty = "/dev/tty" });
+    var term = try Terminal.init(.{
+        .allocator = std.testing.allocator,
+        .tty = "/dev/tty",
+    });
     defer term.deinit();
     // Just testing for compilation.
     if (false) {
@@ -178,5 +181,8 @@ test "terminal is supported" {
 }
 
 test "terminal is not supported" {
-    try std.testing.expectError(error.TerminalNotSupported, Terminal.init(.{ .tty = "/dev/null" }));
+    try std.testing.expectError(error.TerminalNotSupported, Terminal.init(.{
+        .allocator = std.testing.allocator,
+        .tty = "/dev/null",
+    }));
 }
