@@ -1,7 +1,7 @@
 const std = @import("std");
 const tokenizer = @import("tokenizer.zig");
-const ReferenceMarker = @import("heap.zig").ReferenceMarker;
-const Heap = @import("heap.zig").Heap;
+const ReferenceMarker = @import("object_manager.zig").ReferenceMarker;
+const ObjectManager = @import("object_manager.zig").ObjectManager;
 const Val = @import("val.zig").Val;
 const ByteCodeFunc = @import("bytecode.zig").ByteCodeFunc;
 
@@ -43,21 +43,21 @@ pub const Vm = struct {
     builtin_functions: []const Val.Function = &@import("builtin_functions.zig").builtin_functions,
     /// Contains all defined values.
     values: std.StringHashMapUnmanaged(Val),
-    /// Contains all data on the heap.
-    heap: Heap,
+    /// Contains all data on the object_manager.
+    object_manager: ObjectManager,
     /// Contains allocation used by garbage collector.
     gc_marker_allocator: std.heap.ArenaAllocator,
 
     /// Initialize a new VM with the given allocator.
     pub fn init(alloc: std.mem.Allocator) VmError!Vm {
-        const heap = Heap.init(alloc);
+        const object_manager = ObjectManager.init(alloc);
         const stack = try std.ArrayListUnmanaged(Val).initCapacity(alloc, 1024);
         const function_frames = try std.ArrayListUnmanaged(FunctionFrame).initCapacity(alloc, 1024);
         return .{
             .stack = stack,
             .function_frames = function_frames,
             .values = std.StringHashMapUnmanaged(Val){},
-            .heap = heap,
+            .object_manager = object_manager,
             .gc_marker_allocator = std.heap.ArenaAllocator.init(alloc),
         };
     }
@@ -67,16 +67,16 @@ pub const Vm = struct {
         self.stack.deinit(self.allocator());
         self.function_frames.deinit(self.allocator());
         self.values.deinit(self.allocator());
-        self.heap.deinit();
+        self.object_manager.deinit();
     }
 
     /// Get the allocator used by the Vm.
     pub inline fn allocator(self: *Vm) std.mem.Allocator {
-        return self.heap.allocator;
+        return self.object_manager.allocator;
     }
 
     pub fn defineVal(self: *Vm, symbol: []const u8, val: Val) !void {
-        const symbol_val = try self.heap.allocGlobalSymbol(symbol);
+        const symbol_val = try self.object_manager.allocGlobalSymbol(symbol);
         const symbol_str = switch (symbol_val) {
             .symbol => |s| s.asSlice(),
             else => unreachable,
@@ -130,7 +130,7 @@ pub const Vm = struct {
         while (values_iter.next()) |v| {
             try references.markVal(v.*);
         }
-        self.heap.removeGarbage(&references);
+        self.object_manager.removeGarbage(&references);
     }
 
     /// Clear the stack of all its contents.
@@ -248,7 +248,7 @@ pub const Vm = struct {
 test "expression can eval" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", &vm.heap);
+    var bc = try ByteCodeFunc.initStrExpr("(+ (string-length \"four\") -5)", &vm.object_manager);
     defer bc.deinit(std.testing.allocator);
 
     const actual = try vm.runBytecode(&bc, &[_]Val{});
@@ -262,19 +262,19 @@ test "can eval fibonacchi" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
 
-    var bc1 = try ByteCodeFunc.initStrExpr("(define fib (lambda (n) (if (< n 1) 0 (if (< n 3) 1 (+ (fib (- n 1)) (fib (- n 2)))))))", &vm.heap);
+    var bc1 = try ByteCodeFunc.initStrExpr("(define fib (lambda (n) (if (< n 1) 0 (if (< n 3) 1 (+ (fib (- n 1)) (fib (- n 2)))))))", &vm.object_manager);
     defer bc1.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(.void, try vm.runBytecode(&bc1, &[_]Val{}));
 
-    var bc2 = try ByteCodeFunc.initStrExpr("(fib 10)", &vm.heap);
+    var bc2 = try ByteCodeFunc.initStrExpr("(fib 10)", &vm.object_manager);
     defer bc2.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(Val{ .int = 55 }, try vm.runBytecode(&bc2, &[_]Val{}));
 
-    var bc3 = try ByteCodeFunc.initStrExpr("(fib 1)", &vm.heap);
+    var bc3 = try ByteCodeFunc.initStrExpr("(fib 1)", &vm.object_manager);
     defer bc3.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(Val{ .int = 1 }, try vm.runBytecode(&bc3, &[_]Val{}));
 
-    var bc4 = try ByteCodeFunc.initStrExpr("(fib 0)", &vm.heap);
+    var bc4 = try ByteCodeFunc.initStrExpr("(fib 0)", &vm.object_manager);
     defer bc4.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(Val{ .int = 0 }, try vm.runBytecode(&bc4, &[_]Val{}));
 }
@@ -282,7 +282,7 @@ test "can eval fibonacchi" {
 test "successful expression clears stack" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try ByteCodeFunc.initStrExpr("(+ 1 2 3)", &vm.heap);
+    var bc = try ByteCodeFunc.initStrExpr("(+ 1 2 3)", &vm.object_manager);
     defer bc.deinit(std.testing.allocator);
 
     _ = try vm.runBytecode(&bc, &[_]Val{});
@@ -293,7 +293,7 @@ test "successful expression clears stack" {
 test "wrong args halts VM and maintains VM state" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try ByteCodeFunc.initStrExpr("(+ 10 (string-length 4))", &vm.heap);
+    var bc = try ByteCodeFunc.initStrExpr("(+ 10 (string-length 4))", &vm.object_manager);
     defer bc.deinit(std.testing.allocator);
 
     try std.testing.expectError(error.RuntimeError, vm.runBytecode(&bc, &[_]Val{}));
@@ -311,7 +311,7 @@ test "wrong args halts VM and maintains VM state" {
 test "if expression with true pred returns true branch" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try ByteCodeFunc.initStrExpr("(if true 1 2)", &vm.heap);
+    var bc = try ByteCodeFunc.initStrExpr("(if true 1 2)", &vm.object_manager);
     defer bc.deinit(std.testing.allocator);
 
     const v = try vm.runBytecode(&bc, &[_]Val{});
@@ -321,7 +321,7 @@ test "if expression with true pred returns true branch" {
 test "if expression with false pred returns false branch" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try ByteCodeFunc.initStrExpr("(if false 1 2)", &vm.heap);
+    var bc = try ByteCodeFunc.initStrExpr("(if false 1 2)", &vm.object_manager);
     defer bc.deinit(std.testing.allocator);
 
     const v = try vm.runBytecode(&bc, &[_]Val{});
@@ -331,7 +331,7 @@ test "if expression with false pred returns false branch" {
 test "if expression with false pred and empty false branch returns void" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try ByteCodeFunc.initStrExpr("(if false 1)", &vm.heap);
+    var bc = try ByteCodeFunc.initStrExpr("(if false 1)", &vm.object_manager);
     defer bc.deinit(std.testing.allocator);
 
     const v = try vm.runBytecode(&bc, &[_]Val{});
@@ -341,7 +341,7 @@ test "if expression with false pred and empty false branch returns void" {
 test "lambda can eval" {
     var vm = try Vm.init(std.testing.allocator);
     defer vm.deinit();
-    var bc = try ByteCodeFunc.initStrExpr("((lambda (a b c) (+ 1 a b c)) 2 3 4)", &vm.heap);
+    var bc = try ByteCodeFunc.initStrExpr("((lambda (a b c) (+ 1 a b c)) 2 3 4)", &vm.object_manager);
     defer bc.deinit(std.testing.allocator);
 
     const actual = try vm.runBytecode(&bc, &[_]Val{});

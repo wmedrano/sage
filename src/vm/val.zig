@@ -55,7 +55,7 @@ pub const Val = union(Type) {
         }
     };
 
-    /// Contains a string on the heap.
+    /// Contains a string on the object_manager.
     pub const String = struct {
         len: usize,
 

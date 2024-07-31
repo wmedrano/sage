@@ -2,7 +2,7 @@ pub const std = @import("std");
 
 pub const Benchmark = @import("tools/benchmark.zig").Benchmark;
 pub const ByteCodeFunc = @import("vm/bytecode.zig").ByteCodeFunc;
-pub const Heap = @import("vm/heap.zig").Vm;
+pub const ObjectManager = @import("vm/object_manager.zig").Vm;
 pub const Val = @import("vm/val.zig").Val;
 pub const Vm = @import("vm/vm.zig").Vm;
 
@@ -28,13 +28,13 @@ const VmEvalBenchmark = struct {
     pub fn init(alloc: std.mem.Allocator, name: []const u8) !VmEvalBenchmark {
         var vm = try Vm.init(alloc);
         const fib_src = "(define fib (lambda (n) (if (< n 1) 0 (if (< n 3) 1 (+ (fib (- n 1)) (fib (- n 2)))))))";
-        var fib = try ByteCodeFunc.initStrExpr(fib_src, &vm.heap);
+        var fib = try ByteCodeFunc.initStrExpr(fib_src, &vm.object_manager);
         defer fib.deinit(alloc);
         _ = try vm.runBytecode(&fib, &[_]Val{});
         try vm.runGc();
 
         const bench_src = "(fib 13)";
-        const bench = try ByteCodeFunc.initStrExpr(bench_src, &vm.heap);
+        const bench = try ByteCodeFunc.initStrExpr(bench_src, &vm.object_manager);
         return .{
             .name = name,
             .vm = vm,

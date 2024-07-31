@@ -1,13 +1,13 @@
 const std = @import("std");
 const Val = @import("val.zig").Val;
 
-pub const Heap = struct {
+pub const ObjectManager = struct {
     allocator: std.mem.Allocator,
     strings: std.ArrayListUnmanaged(*Val.String),
     global_strings: std.StringHashMapUnmanaged(*Val.String),
     global_functions: std.ArrayListUnmanaged(*Val.Function),
 
-    pub fn init(allocator: std.mem.Allocator) Heap {
+    pub fn init(allocator: std.mem.Allocator) ObjectManager {
         return .{
             .allocator = allocator,
             .strings = std.ArrayListUnmanaged(*Val.String){},
@@ -16,7 +16,7 @@ pub const Heap = struct {
         };
     }
 
-    pub fn deinit(self: *Heap) void {
+    pub fn deinit(self: *ObjectManager) void {
         for (self.strings.items) |s| s.deinit(self.allocator);
         self.strings.deinit(self.allocator);
 
@@ -32,11 +32,11 @@ pub const Heap = struct {
         self.global_functions.deinit(self.allocator);
     }
 
-    pub fn stringCount(self: *const Heap) usize {
+    pub fn stringCount(self: *const ObjectManager) usize {
         return self.strings.items.len + @as(usize, self.global_strings.size);
     }
 
-    pub fn removeGarbage(self: *Heap, marked: *const ReferenceMarker) void {
+    pub fn removeGarbage(self: *ObjectManager, marked: *const ReferenceMarker) void {
         var dst: usize = 0;
         for (self.strings.items) |string| {
             if (marked.containsString(string)) {
@@ -49,13 +49,13 @@ pub const Heap = struct {
         self.strings.shrinkRetainingCapacity(dst);
     }
 
-    pub fn allocString(self: *Heap, s: []const u8) !Val {
+    pub fn allocString(self: *ObjectManager, s: []const u8) !Val {
         const s_copy = try Val.String.init(self.allocator, s);
         try self.strings.append(self.allocator, s_copy);
         return Val{ .string = s_copy };
     }
 
-    pub fn allocGlobalString(self: *Heap, s: []const u8) !Val {
+    pub fn allocGlobalString(self: *ObjectManager, s: []const u8) !Val {
         if (self.global_strings.get(s)) |global_s| {
             return .{ .string = global_s };
         }
@@ -64,7 +64,7 @@ pub const Heap = struct {
         return Val{ .string = s_copy };
     }
 
-    pub fn allocGlobalSymbol(self: *Heap, s: []const u8) !Val {
+    pub fn allocGlobalSymbol(self: *ObjectManager, s: []const u8) !Val {
         if (self.global_strings.get(s)) |global_s| {
             return .{ .symbol = global_s };
         }
@@ -73,15 +73,15 @@ pub const Heap = struct {
         return Val{ .symbol = s_copy };
     }
 
-    pub fn allocFunction(self: *Heap) !*Val.Function {
+    pub fn allocFunction(self: *ObjectManager) !*Val.Function {
         const res = try self.allocator.create(Val.Function);
         try self.global_functions.append(self.allocator, res);
         return res;
     }
 
     /// Pretty print the value.
-    pub fn format(self: *const Heap, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("Heap:\n", .{});
+    pub fn format(self: *const ObjectManager, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("ObjectManager:\n", .{});
         var global_strings_iter = self.global_strings.keyIterator();
         while (global_strings_iter.next()) |s| {
             try writer.print("  global_string: {s}\n", .{s.*});
@@ -132,8 +132,8 @@ pub const ReferenceMarker = struct {
     }
 };
 
-test "heap can allocate string" {
-    var h = Heap.init(std.testing.allocator);
+test "object_manager can allocate string" {
+    var h = ObjectManager.init(std.testing.allocator);
     defer h.deinit();
     var test_str_val = try Val.String.init(std.testing.allocator, "test-string");
     defer test_str_val.deinit(std.testing.allocator);
@@ -144,7 +144,7 @@ test "heap can allocate string" {
 }
 
 test "garbage collection removes unused strings" {
-    var h = Heap.init(std.testing.allocator);
+    var h = ObjectManager.init(std.testing.allocator);
     defer h.deinit();
     try std.testing.expectEqual(0, h.stringCount());
     _ = try h.allocString("gc-string");

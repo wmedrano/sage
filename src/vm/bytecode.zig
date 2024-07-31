@@ -3,7 +3,7 @@ const std = @import("std");
 const Ast = @import("ast.zig").Ast;
 const AstCollection = @import("ast.zig").AstCollection;
 const AstType = @import("ast.zig").AstType;
-const Heap = @import("heap.zig").Heap;
+const ObjectManager = @import("object_manager.zig").ObjectManager;
 const Ir = @import("ir.zig").Ir;
 const Leaf = @import("ast.zig").Leaf;
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
@@ -52,24 +52,24 @@ pub const ByteCodeFunc = struct {
     constants: []Val,
 
     /// Create a new ByteCodeFunc from an Ir.
-    pub fn init(ir: *const Ir, heap: *Heap) !ByteCodeFunc {
+    pub fn init(ir: *const Ir, object_manager: *ObjectManager) !ByteCodeFunc {
         var instructions = std.ArrayListUnmanaged(ByteCode){};
-        errdefer instructions.deinit(heap.allocator);
+        errdefer instructions.deinit(object_manager.allocator);
         var constants = std.ArrayListUnmanaged(Val){};
-        errdefer constants.deinit(heap.allocator);
-        try ByteCodeFunc.initImpl(ir, &instructions, &constants, heap);
-        try instructions.append(heap.allocator, .ret);
+        errdefer constants.deinit(object_manager.allocator);
+        try ByteCodeFunc.initImpl(ir, &instructions, &constants, object_manager);
+        try instructions.append(object_manager.allocator, .ret);
         return .{
-            .instructions = try instructions.toOwnedSlice(heap.allocator),
-            .constants = try constants.toOwnedSlice(heap.allocator),
+            .instructions = try instructions.toOwnedSlice(object_manager.allocator),
+            .constants = try constants.toOwnedSlice(object_manager.allocator),
         };
     }
 
     /// Create a new ByteCodeFunc from a string expression.
-    pub fn initStrExpr(expr: []const u8, heap: *Heap) !ByteCodeFunc {
-        const ir = try Ir.initStrExpr(expr, heap);
-        defer ir.deinit(heap.allocator);
-        return ByteCodeFunc.init(ir, heap);
+    pub fn initStrExpr(expr: []const u8, object_manager: *ObjectManager) !ByteCodeFunc {
+        const ir = try Ir.initStrExpr(expr, object_manager);
+        defer ir.deinit(object_manager.allocator);
+        return ByteCodeFunc.init(ir, object_manager);
     }
 
     /// Deallocate all memory associated with the ByteCodeFunc.
@@ -91,58 +91,58 @@ pub const ByteCodeFunc = struct {
         }
     }
 
-    fn initImpl(ir: *const Ir, res: *std.ArrayListUnmanaged(ByteCode), constants: *std.ArrayListUnmanaged(Val), heap: *Heap) !void {
+    fn initImpl(ir: *const Ir, res: *std.ArrayListUnmanaged(ByteCode), constants: *std.ArrayListUnmanaged(Val), object_manager: *ObjectManager) !void {
         switch (ir.*) {
             .constant => |val| {
                 const val_idx = constants.items.len;
-                try res.append(heap.allocator, .{ .push_const = val_idx });
-                try constants.append(heap.allocator, val);
+                try res.append(object_manager.allocator, .{ .push_const = val_idx });
+                try constants.append(object_manager.allocator, val);
             },
             .deref => |d| {
                 const val_idx = constants.items.len;
-                const symbol_val = try heap.allocGlobalSymbol(d);
-                try constants.append(heap.allocator, symbol_val);
-                try res.append(heap.allocator, .{ .deref = val_idx });
+                const symbol_val = try object_manager.allocGlobalSymbol(d);
+                try constants.append(object_manager.allocator, symbol_val);
+                try res.append(object_manager.allocator, .{ .deref = val_idx });
             },
-            .get_arg => |idx| try res.append(heap.allocator, .{ .get_arg = idx }),
+            .get_arg => |idx| try res.append(object_manager.allocator, .{ .get_arg = idx }),
             .function_call => |f| {
-                try ByteCodeFunc.initImpl(f.function, res, constants, heap);
-                for (f.args) |a| try ByteCodeFunc.initImpl(a, res, constants, heap);
-                try res.append(heap.allocator, .{ .eval = f.args.len + 1 });
+                try ByteCodeFunc.initImpl(f.function, res, constants, object_manager);
+                for (f.args) |a| try ByteCodeFunc.initImpl(a, res, constants, object_manager);
+                try res.append(object_manager.allocator, .{ .eval = f.args.len + 1 });
             },
             .if_expr => |expr| {
-                try initImpl(expr.predicate, res, constants, heap);
+                try initImpl(expr.predicate, res, constants, object_manager);
                 // True branch
                 var true_expr_res = std.ArrayListUnmanaged(ByteCode){};
-                defer true_expr_res.deinit(heap.allocator);
-                try initImpl(expr.true_expr, &true_expr_res, constants, heap);
+                defer true_expr_res.deinit(object_manager.allocator);
+                try initImpl(expr.true_expr, &true_expr_res, constants, object_manager);
                 // False branch
                 var false_expr_res = std.ArrayListUnmanaged(ByteCode){};
-                defer false_expr_res.deinit(heap.allocator);
-                try initImpl(if (expr.false_expr) |f| f else &Ir{ .constant = .void }, &false_expr_res, constants, heap);
+                defer false_expr_res.deinit(object_manager.allocator);
+                try initImpl(if (expr.false_expr) |f| f else &Ir{ .constant = .void }, &false_expr_res, constants, object_manager);
                 // Make final expression.
-                try res.append(heap.allocator, .{ .jump_if = false_expr_res.items.len + 1 });
-                try res.appendSlice(heap.allocator, false_expr_res.items);
-                try res.append(heap.allocator, .{ .jump = true_expr_res.items.len });
-                try res.appendSlice(heap.allocator, true_expr_res.items);
+                try res.append(object_manager.allocator, .{ .jump_if = false_expr_res.items.len + 1 });
+                try res.appendSlice(object_manager.allocator, false_expr_res.items);
+                try res.append(object_manager.allocator, .{ .jump = true_expr_res.items.len });
+                try res.appendSlice(object_manager.allocator, true_expr_res.items);
             },
             .lambda => |lambda| {
                 var l_instructions = std.ArrayListUnmanaged(ByteCode){};
-                errdefer l_instructions.deinit(heap.allocator);
+                errdefer l_instructions.deinit(object_manager.allocator);
                 var l_constants = std.ArrayListUnmanaged(Val){};
-                errdefer l_constants.deinit(heap.allocator);
+                errdefer l_constants.deinit(object_manager.allocator);
                 for (lambda.exprs) |expr| {
-                    try ByteCodeFunc.initImpl(expr, &l_instructions, &l_constants, heap);
+                    try ByteCodeFunc.initImpl(expr, &l_instructions, &l_constants, object_manager);
                 }
-                try l_instructions.append(heap.allocator, .ret);
-                const lambda_fn = try heap.allocFunction();
+                try l_instructions.append(object_manager.allocator, .ret);
+                const lambda_fn = try object_manager.allocFunction();
                 lambda_fn.* = .{
-                    .name = try heap.allocator.dupe(u8, lambda.name),
+                    .name = try object_manager.allocator.dupe(u8, lambda.name),
                     .is_static = false,
                     .function = .{
                         .bytecode = .{
-                            .instructions = try l_instructions.toOwnedSlice(heap.allocator),
-                            .constants = try l_constants.toOwnedSlice(heap.allocator),
+                            .instructions = try l_instructions.toOwnedSlice(object_manager.allocator),
+                            .constants = try l_constants.toOwnedSlice(object_manager.allocator),
                         },
                     },
                 };
@@ -151,7 +151,7 @@ pub const ByteCodeFunc = struct {
                         .function = lambda_fn,
                     },
                 };
-                try initImpl(&lambda_ir, res, constants, heap);
+                try initImpl(&lambda_ir, res, constants, object_manager);
             },
         }
     }
@@ -162,9 +162,9 @@ test "bytecode size is small" {
 }
 
 test "push single value" {
-    var heap = Heap.init(std.testing.allocator);
-    defer heap.deinit();
-    var actual = try ByteCodeFunc.initStrExpr("1", &heap);
+    var object_manager = ObjectManager.init(std.testing.allocator);
+    defer object_manager.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("1", &object_manager);
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -176,9 +176,9 @@ test "push single value" {
 }
 
 test "simple expression" {
-    var heap = Heap.init(std.testing.allocator);
-    defer heap.deinit();
-    var actual = try ByteCodeFunc.initStrExpr("(+ 1 2 variable)", &heap);
+    var object_manager = ObjectManager.init(std.testing.allocator);
+    defer object_manager.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("(+ 1 2 variable)", &object_manager);
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .deref = 0 },
@@ -189,17 +189,17 @@ test "simple expression" {
         .ret,
     }, actual.instructions);
     try std.testing.expectEqualDeep(&[_]Val{
-        try heap.allocGlobalSymbol("+"),
+        try object_manager.allocGlobalSymbol("+"),
         .{ .int = 1 },
         .{ .int = 2 },
-        try heap.allocGlobalSymbol("variable"),
+        try object_manager.allocGlobalSymbol("variable"),
     }, actual.constants);
 }
 
 test "if statement" {
-    var heap = Heap.init(std.testing.allocator);
-    defer heap.deinit();
-    var actual = try ByteCodeFunc.initStrExpr("(if true 1 2)", &heap);
+    var object_manager = ObjectManager.init(std.testing.allocator);
+    defer object_manager.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("(if true 1 2)", &object_manager);
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -217,9 +217,9 @@ test "if statement" {
 }
 
 test "if statement without false branch uses void false branch" {
-    var heap = Heap.init(std.testing.allocator);
-    defer heap.deinit();
-    var actual = try ByteCodeFunc.initStrExpr("(if true 1)", &heap);
+    var object_manager = ObjectManager.init(std.testing.allocator);
+    defer object_manager.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("(if true 1)", &object_manager);
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -237,9 +237,9 @@ test "if statement without false branch uses void false branch" {
 }
 
 test "lambda is pushed" {
-    var heap = Heap.init(std.testing.allocator);
-    defer heap.deinit();
-    var actual = try ByteCodeFunc.initStrExpr("(lambda (a b) (+ a b))", &heap);
+    var object_manager = ObjectManager.init(std.testing.allocator);
+    defer object_manager.deinit();
+    var actual = try ByteCodeFunc.initStrExpr("(lambda (a b) (+ a b))", &object_manager);
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&[_]ByteCode{
         .{ .push_const = 0 },
@@ -249,11 +249,11 @@ test "lambda is pushed" {
 }
 
 test "recursive function" {
-    var heap = Heap.init(std.testing.allocator);
-    defer heap.deinit();
+    var object_manager = ObjectManager.init(std.testing.allocator);
+    defer object_manager.deinit();
     var actual = try ByteCodeFunc.initStrExpr(
         "(define fib (lambda (n) (if (< n 1) 0 (if (< n 3) 1 (+ (fib (- n 1)) (fib (- n 2)))))))",
-        &heap,
+        &object_manager,
     );
     defer actual.deinit(std.testing.allocator);
     try std.testing.expectEqualDeep(&[_]ByteCode{
@@ -263,14 +263,14 @@ test "recursive function" {
         .{ .eval = 3 },
         .ret,
     }, actual.instructions);
-    try std.testing.expectEqual(1, heap.global_functions.items.len);
+    try std.testing.expectEqual(1, object_manager.global_functions.items.len);
     try std.testing.expectEqualDeep(&[_]Val{
-        try heap.allocGlobalSymbol("%define"),
-        try heap.allocGlobalSymbol("fib"),
-        .{ .function = heap.global_functions.items[0] },
+        try object_manager.allocGlobalSymbol("%define"),
+        try object_manager.allocGlobalSymbol("fib"),
+        .{ .function = object_manager.global_functions.items[0] },
     }, actual.constants);
     try std.testing.expectEqualDeep(
-        heap.global_functions.items[0].name,
+        object_manager.global_functions.items[0].name,
         "fib",
     );
 }
