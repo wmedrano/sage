@@ -67,8 +67,9 @@ pub const ByteCodeFunc = struct {
 
     /// Create a new ByteCodeFunc from a string expression.
     pub fn initStrExpr(expr: []const u8, object_manager: *ObjectManager) !ByteCodeFunc {
-        const ir = try Ir.initStrExpr(expr, object_manager);
-        defer ir.deinit(object_manager.allocator);
+        var ir_allocator = std.heap.ArenaAllocator.init(object_manager.allocator);
+        defer ir_allocator.deinit();
+        const ir = try Ir.initStrExpr(ir_allocator.allocator(), expr, object_manager);
         return ByteCodeFunc.init(ir, object_manager);
     }
 

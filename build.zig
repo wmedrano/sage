@@ -12,13 +12,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
-    const test_exe = b.addTest(.{
+    const vm_test_exe = b.addTest(.{
         .name = "vm-tests",
         .root_source_file = b.path("src/vm/tests.zig"),
         .target = target,
         .optimize = optimize,
     });
-    b.installArtifact(test_exe);
+    const term_test_exe = b.addTest(.{
+        .name = "term-tests",
+        .root_source_file = b.path("src/term/term.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const vm_test_cmd = b.addRunArtifact(vm_test_exe);
+    const term_test_cmd = b.addRunArtifact(term_test_exe);
 
     const benchmark_exe = b.addExecutable(.{
         .name = "sage-vm-benchmarks",
@@ -26,7 +33,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSafe,
     });
-    b.installArtifact(benchmark_exe);
 
     // zig build run
     const run_cmd = b.addRunArtifact(exe);
@@ -34,12 +40,13 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+    const build_step = b.step("build", "Build the app");
+    build_step.dependOn(&exe.step);
 
     // zig build test
-    const test_cmd = b.addRunArtifact(test_exe);
-    if (b.args) |args| test_cmd.addArgs(args);
     const test_run_step = b.step("test", "Run tests");
-    test_run_step.dependOn(&test_cmd.step);
+    test_run_step.dependOn(&vm_test_cmd.step);
+    test_run_step.dependOn(&term_test_cmd.step);
 
     // zig build benchmark
     const benchmark_cmd = b.addRunArtifact(benchmark_exe);
